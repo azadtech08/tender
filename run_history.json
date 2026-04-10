@@ -1,0 +1,25 @@
+[
+  {
+    "id": "20260410_162715",
+    "started_at": "2026-04-10T16:27:15.904754",
+    "completed_at": "2026-04-10T16:35:21.900812",
+    "keywords": [
+      "Server",
+      "Laptop",
+      "AMC",
+      "CAMC",
+      "FMS",
+      "Networking",
+      "Firewall",
+      "HPC",
+      "Workstation",
+      "Software Development",
+      "IT Support",
+      "Data Center"
+    ],
+    "cards_per_kw": 3,
+    "min_value": 50000,
+    "output_file": "Tenders_20260410_1635.xlsx",
+    "status": "Completed"
+  }
+]

@@ -1,0 +1,48 @@
+# Compiled binary — never commit
+*.exe
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+
+# Secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Node
+node_modules/
+.next/
+out/
+
+# Playwright
+.playwright/
+playwright-report/
+test-results/
+
+# Local downloads/outputs (regression corpus is already committed)
+downloads_poc/
+downloads_new/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDEs
+.idea/
+*.suo
+*.user
+
+# Legacy decompiled — track structure but not large artifacts
+legacy/GeM_Tender_Bot.exe_extracted/
