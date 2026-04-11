@@ -1,48 +1,164 @@
-# Compiled binary — never commit
-*.exe
+# ============================================================================
+# GeM Tender SaaS — .gitignore
+# ============================================================================
 
-# Python
+# --- Compiled binaries (NEVER commit) ---
+*.exe
+*.com
+*.dll
+*.so
+*.dylib
+*.o
+
+# --- Python ---
 __pycache__/
-*.pyc
-*.pyo
-*.pyd
+*.py[cod]
+*$py.class
+*.so
 .Python
-*.egg-info/
-dist/
 build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+pip-log.txt
+pip-delete-this-directory.txt
+.pytest_cache/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+htmlcov/
+.tox/
+.hypothesis/
+*.mypy_cache
+.dmypy.json
+dmypy.json
+.pyre/
+*.prof
+
+# --- Virtual Environments ---
 .venv/
 venv/
+ENV/
 env/
+.venv
 
-# Secrets
+# --- Secrets & .env files ---
 .env
 .env.*
 !.env.example
 *.pem
 *.key
+*.crt
+.secrets/
+secrets.json
 
-# Node
+# --- Node / Next.js ---
 node_modules/
 .next/
 out/
+.nuxt/
+dist/
+.cache/
+.vuepress/dist/
+.serverless/
+.fusebox/
+.dynamodb/
+.tern-port
+.yarn/cache
+.yarn/unplugged
 
-# Playwright
+# --- Playwright ---
 .playwright/
 playwright-report/
 test-results/
+.pwtest/
 
-# Local downloads/outputs (regression corpus is already committed)
-downloads_poc/
-downloads_new/
-
-# OS
+# --- IDE & Editor ---
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+*.swp
+*.swo
+*~
 .DS_Store
 Thumbs.db
-
-# IDEs
-.idea/
 *.suo
 *.user
+*.userprefs
+*.VC.db
+*.vcxproj.user
 
-# Legacy decompiled — track structure but not large artifacts
+# --- OS ---
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Desktop.ini
+*.log
+
+# --- Docker ---
+.docker/
+docker-compose.override.yml
+.dockerignore
+
+# --- Development / Local ---
+downloads_poc/
+downloads_new/
+.env.local
+.env.*.local
+.env.production.local
+
+# --- Database ---
+*.db
+*.sqlite
+*.sqlite3
+dump.rdb
+
+# --- Package Managers ---
+package-lock.json
+yarn.lock
+poetry.lock
+Pipfile.lock
+
+# --- Temp files ---
+*.tmp
+*.temp
+*.bak
+*~
+.#*
+\#*\#
+
+# --- Legacy decompiled code (reference only, DO NOT SHIP) ---
 legacy/GeM_Tender_Bot.exe_extracted/
+legacy/decompiled/PYZ.pyz_extracted/
+
+# --- PDFs (local test downloads) ---
+downloads/*.pdf
+!downloads/.gitkeep
+
+# --- Cache directories ---
+.cache/
+__cache__/
+*.cache
+
+# --- Misc ---
+.EB_EXTENSIONS/
+.elasticbeanstalk/
+*.pem
