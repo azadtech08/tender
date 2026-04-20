@@ -1,0 +1,138 @@
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,600;1,400&family=Inter:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* ── Industrial Intelligence palette ── */
+    --bg-primary:   #0F1117;
+    --bg-surface:   #1A1D27;
+    --bg-elevated:  #242833;
+    --bg-card:      #1E2130;
+    --text-primary: #E8E9ED;
+    --text-secondary: #8B8D97;
+    --text-muted:   #555770;
+    --accent:       #F59E0B;       /* amber — the action colour */
+    --accent-dim:   #78450A;
+    --border:       #2C3040;
+    --border-bright:#3A3F52;
+
+    --status-running:   #3B82F6;
+    --status-completed: #10B981;
+    --status-failed:    #EF4444;
+    --status-pending:   #6B7280;
+    --status-queued:    #F59E0B;
+    --status-cancelled: #4B5563;
+
+    /* shadcn/ui compatible tokens → dark values */
+    --background: 220 13% 7%;          /* #0F1117 */
+    --foreground:  220 10% 92%;        /* #E8E9ED */
+    --card:        222 16% 14%;        /* #1E2130 */
+    --card-foreground: 220 10% 92%;
+    --popover:     222 18% 16%;
+    --popover-foreground: 220 10% 92%;
+    --primary:     38 92% 50%;         /* amber */
+    --primary-foreground: 220 13% 7%;
+    --secondary:   222 14% 18%;
+    --secondary-foreground: 220 10% 92%;
+    --muted:       222 14% 18%;
+    --muted-foreground: 220 6% 54%;
+    --accent:      38 92% 50%;
+    --accent-foreground: 220 13% 7%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 220 10% 92%;
+    --border:      220 14% 20%;        /* #2C3040 */
+    --input:       220 14% 20%;
+    --ring:        38 92% 50%;
+    --radius:      0.5rem;
+  }
+}
+
+@layer base {
+  * { @apply border-border; }
+
+  html { color-scheme: dark; }
+
+  body {
+    font-family: 'Inter', system-ui, sans-serif;
+    background-color: var(--bg-primary);
+    color: var(--text-primary);
+    @apply antialiased;
+  }
+
+  /* Subtle dot-grid background */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background-image: radial-gradient(circle, rgba(255,255,255,0.04) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: var(--bg-primary); }
+  ::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 3px; }
+  ::-webkit-scrollbar-thumb:hover { background: #4A5068; }
+
+  code, .font-mono, pre {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  }
+}
+
+@layer utilities {
+  /* Glow effects */
+  .glow-amber { box-shadow: 0 0 16px rgba(245,158,11,0.25); }
+  .glow-blue  { box-shadow: 0 0 16px rgba(59,130,246,0.25); }
+  .glow-green { box-shadow: 0 0 16px rgba(16,185,129,0.25); }
+
+  /* Status pills */
+  .status-running   { @apply bg-blue-900/40 text-blue-300 border border-blue-700/50; }
+  .status-completed { @apply bg-emerald-900/40 text-emerald-300 border border-emerald-700/50; }
+  .status-failed    { @apply bg-red-900/40 text-red-300 border border-red-700/50; }
+  .status-pending   { @apply bg-slate-800/60 text-slate-400 border border-slate-600/50; }
+  .status-queued    { @apply bg-amber-900/40 text-amber-300 border border-amber-700/50; }
+  .status-cancelled { @apply bg-slate-800/60 text-slate-500 border border-slate-600/30; }
+
+  /* Card surfaces */
+  .card-surface {
+    background-color: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+  }
+  .card-elevated {
+    background-color: var(--bg-elevated);
+    border: 1px solid var(--border-bright);
+    border-radius: 12px;
+  }
+
+  /* Terminal */
+  .terminal {
+    background-color: #0A0B0F;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    line-height: 1.6;
+  }
+
+  /* Pulse animation for running status */
+  .pulse-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--status-running);
+    animation: pulse-ring 1.4s ease-in-out infinite;
+  }
+
+  @keyframes pulse-ring {
+    0%   { box-shadow: 0 0 0 0 rgba(59,130,246,0.7); }
+    70%  { box-shadow: 0 0 0 8px rgba(59,130,246,0); }
+    100% { box-shadow: 0 0 0 0 rgba(59,130,246,0); }
+  }
+}

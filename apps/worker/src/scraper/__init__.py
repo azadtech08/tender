@@ -1,0 +1,1 @@
+"""GeM portal scraper package."""

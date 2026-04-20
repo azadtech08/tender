@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python3)",
+      "Bash(python3 -c \"import openpyxl; print\\('openpyxl available'\\)\")",
+      "Bash(pdftotext \"C:\\\\Users\\\\admin\\\\Downloads\\\\2_GeM_Tender_Bot_Package_zip\\\\GeM_Tender_Bot_Package\\\\downloads\\\\GEM_2025_B_6478805.pdf\" -)",
+      "Bash(pdftotext \"C:\\\\Users\\\\admin\\\\Downloads\\\\2_GeM_Tender_Bot_Package_zip\\\\GeM_Tender_Bot_Package\\\\downloads\\\\GEM_2026_B_7160110.pdf\" -)",
+      "WebSearch",
+      "Bash(ls -lah \"/c/Users/admin/Downloads/2_GeM_Tender_Bot_Package_zip/GeM_Tender_Bot_Package/\"*.exe)",
+      "Bash(file \"/c/Users/admin/Downloads/2_GeM_Tender_Bot_Package_zip/GeM_Tender_Bot_Package/\"*.exe)",
+      "Bash(python \"C:/Users/admin/AppData/Local/Programs/Python/Python312/Lib/site-packages/pyinstxtractor_ng.py\" \"../GeM_Tender_Bot.exe\")",
+      "Bash(docker compose:*)",
+      "Bash(cat /c/Users/admin/Downloads/2_GeM_Tender_Bot_Package_zip/GeM_Tender_Bot_Package/apps/api/tests/*.py)",
+      "Bash(git -C /c/Users/admin/Downloads/2_GeM_Tender_Bot_Package_zip/GeM_Tender_Bot_Package log --oneline -10)",
+      "Bash(mkdir -p \"c:\\\\Users\\\\admin\\\\Downloads\\\\2_GeM_Tender_Bot_Package_zip\\\\GeM_Tender_Bot_Package\\\\apps\\\\worker\\\\src\\\\utils\")",
+      "Bash(mkdir -p \"c:\\\\Users\\\\admin\\\\Downloads\\\\2_GeM_Tender_Bot_Package_zip\\\\GeM_Tender_Bot_Package\\\\apps\\\\api\\\\src\\\\utils\")",
+      "Bash(wc -l \"/c/Users/admin/Downloads/2_GeM_Tender_Bot_Package_zip/GeM_Tender_Bot_Package/packages/db-models/src/db_models\"/*.py)",
+      "Bash(grep -E \"\\\\.py$\")"
+    ]
+  }
+}
