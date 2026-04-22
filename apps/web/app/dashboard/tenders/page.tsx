@@ -81,6 +81,7 @@ export default function TendersPage() {
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [sort, setSort]       = useState("bid_start_latest");
+  const [match, setMatch]     = useState<"any" | "all">("any");
   const [selectedMinistries, setSelectedMinistries] = useState<string[]>([]);
   const [ministries, setMinistries] = useState<string[]>([]);
   const [ministryOpen, setMinistryOpen] = useState(false);
@@ -95,11 +96,20 @@ export default function TendersPage() {
     if (res.ok) setMinistries(await res.json());
   }
 
-  async function fetchTenders(q = search, p = page, s = sort, m = selectedMinistries) {
+  async function fetchTenders(
+    q = search,
+    p = page,
+    s = sort,
+    m = selectedMinistries,
+    mt = match,
+  ) {
     setLoading(true);
     const token = await getToken();
     const params = new URLSearchParams({ per_page: String(PER_PAGE), page: String(p) });
-    if (q) params.set("search", q);
+    if (q) {
+      params.set("search", q);
+      params.set("match", mt);
+    }
     if (s) params.set("sort", s);
     if (m.length) params.set("ministry", m.join(","));
     const res = await fetch(`${API}/api/tenders?${params}`, {
@@ -167,14 +177,21 @@ export default function TendersPage() {
     if (searchRef.current) clearTimeout(searchRef.current);
     searchRef.current = setTimeout(() => {
       setPage(1);
-      fetchTenders(val, 1, sort, selectedMinistries);
+      fetchTenders(val, 1, sort, selectedMinistries, match);
     }, 400);
   }
 
   function handleSort(val: string) {
     setSort(val);
     setPage(1);
-    fetchTenders(search, 1, val, selectedMinistries);
+    fetchTenders(search, 1, val, selectedMinistries, match);
+  }
+
+  function handleMatch(val: "any" | "all") {
+    if (val === match) return;
+    setMatch(val);
+    setPage(1);
+    fetchTenders(search, 1, sort, selectedMinistries, val);
   }
 
   function toggleMinistry(m: string) {
@@ -183,18 +200,18 @@ export default function TendersPage() {
       : [...selectedMinistries, m];
     setSelectedMinistries(next);
     setPage(1);
-    fetchTenders(search, 1, sort, next);
+    fetchTenders(search, 1, sort, next, match);
   }
 
   function clearMinistries() {
     setSelectedMinistries([]);
     setPage(1);
-    fetchTenders(search, 1, sort, []);
+    fetchTenders(search, 1, sort, [], match);
   }
 
   function goPage(p: number) {
     setPage(p);
-    fetchTenders(search, p, sort, selectedMinistries);
+    fetchTenders(search, p, sort, selectedMinistries, match);
   }
 
   async function deleteTender(id: number, ref: string | null) {
@@ -258,16 +275,41 @@ export default function TendersPage() {
       <div className="flex flex-wrap gap-3 items-center">
         <input
           type="text"
-          placeholder="Search title, description, organisation…"
+          placeholder="Search — type multiple keywords separated by commas (e.g. laptop, server, amc)"
           value={search}
           onChange={(e) => handleSearch(e.target.value)}
-          className="flex-1 min-w-[200px] max-w-sm text-sm px-4 py-2 rounded-lg font-mono outline-none transition-all"
+          title="Enter multiple keywords separated by commas. Toggle ANY / ALL to control match mode."
+          className="flex-1 min-w-[260px] max-w-xl text-sm px-4 py-2 rounded-lg font-mono outline-none transition-all"
           style={{
             background: "var(--bg-elevated)",
             border: "1px solid var(--border-bright)",
             color: "var(--text-primary)",
           }}
         />
+        <div
+          className="flex items-center rounded-lg overflow-hidden"
+          style={{ border: "1px solid var(--border-bright)" }}
+          title={
+            match === "any"
+              ? "ANY — show tenders matching at least one keyword"
+              : "ALL — show tenders matching every keyword"
+          }
+        >
+          {(["any", "all"] as const).map((m) => (
+            <button
+              key={m}
+              onClick={() => handleMatch(m)}
+              className="text-xs font-mono px-3 py-2 transition-colors"
+              style={{
+                background: match === m ? "var(--accent)" : "var(--bg-elevated)",
+                color: match === m ? "white" : "var(--text-secondary)",
+                minWidth: "56px",
+              }}
+            >
+              {m.toUpperCase()}
+            </button>
+          ))}
+        </div>
         <div ref={ministryRef} className="relative flex items-center gap-1.5">
           <span className="text-xs font-mono whitespace-nowrap" style={{ color: "var(--accent)" }}>Ministry:</span>
           <button

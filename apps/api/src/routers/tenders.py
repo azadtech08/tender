@@ -7,7 +7,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse, Response
-from sqlalchemy import func, nulls_last, or_, select, text
+from sqlalchemy import and_, func, nulls_last, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import TokenData, get_current_user
@@ -36,6 +36,45 @@ _SORT_OPTIONS = {
     "bid_end_oldest":     nulls_last(Tender.bid_end_date.asc()),
 }
 
+# Max distinct keywords we combine in a single search (guard against pathological input).
+_MAX_SEARCH_KEYWORDS = 25
+
+
+def _parse_search_keywords(raw: str) -> list[str]:
+    """Split free-form search input into keyword phrases.
+
+    Prefers commas as separators so multi-word phrases ("data entry") are
+    preserved; falls back to whitespace when no comma is present.
+    Deduplicates case-insensitively and caps the list length.
+    """
+    if not raw or not raw.strip():
+        return []
+    parts = raw.split(",") if "," in raw else raw.split()
+    out: list[str] = []
+    seen: set[str] = set()
+    for p in parts:
+        kw = p.strip()
+        if not kw:
+            continue
+        key = kw.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(kw)
+        if len(out) >= _MAX_SEARCH_KEYWORDS:
+            break
+    return out
+
+
+def _build_tsquery(keywords: list[str], match: str):
+    """Combine per-keyword plainto_tsqueries with OR (||) or AND (&&)."""
+    parts = [func.plainto_tsquery(text("'english'"), kw) for kw in keywords]
+    combined = parts[0]
+    op = "&&" if match == "all" else "||"
+    for p in parts[1:]:
+        combined = combined.op(op)(p)
+    return combined
+
 
 @router.get("/ministries")
 async def list_ministries(
@@ -59,6 +98,7 @@ async def list_tenders(
     job_id: int | None = Query(default=None),
     keyword: str | None = Query(default=None),
     search: str | None = Query(default=None),
+    match: str = Query(default="any", pattern="^(any|all)$"),
     ministry: str | None = Query(default=None),
     sort: str | None = Query(default=None),
     page: int = Query(default=1, ge=1),
@@ -83,22 +123,27 @@ async def list_tenders(
         else:
             q = q.where(Tender.ministry.in_(ministry_list))
 
-    if search:
-        # Use Postgres FTS via search_vector (tsvector + GIN index) when available;
-        # fall back to ILIKE if the column doesn't exist yet (pre-migration envs).
+    # Parse possibly multi-keyword search (comma- or whitespace-separated).
+    # `match=any` → OR semantics (default, GeM-like), `match=all` → AND semantics.
+    search_keywords = _parse_search_keywords(search) if search else []
+    combined_tsq = None
+    if search_keywords:
         try:
-            tsq = func.plainto_tsquery(text("'english'"), search)
-            q = q.where(Tender.search_vector.op("@@")(tsq))
+            combined_tsq = _build_tsquery(search_keywords, match)
+            q = q.where(Tender.search_vector.op("@@")(combined_tsq))
         except AttributeError:
-            # Older schema without search_vector — degrade gracefully
-            pattern = f"%{search}%"
-            q = q.where(
-                or_(
-                    Tender.title.ilike(pattern),
-                    Tender.description.ilike(pattern),
-                    Tender.organisation.ilike(pattern),
+            # Older schema without search_vector — degrade to ILIKE.
+            clauses = []
+            for kw in search_keywords:
+                pat = f"%{kw}%"
+                clauses.append(
+                    or_(
+                        Tender.title.ilike(pat),
+                        Tender.description.ilike(pat),
+                        Tender.organisation.ilike(pat),
+                    )
                 )
-            )
+            q = q.where(or_(*clauses) if match == "any" else and_(*clauses))
 
     count_q = select(func.count()).select_from(q.subquery())
     total = (await db.execute(count_q)).scalar_one()
@@ -107,10 +152,9 @@ async def list_tenders(
     effective_sort = sort if (sort and sort in _SORT_OPTIONS) else None
     if effective_sort:
         q = q.order_by(_SORT_OPTIONS[effective_sort], Tender.id.desc())
-    elif search:
+    elif combined_tsq is not None:
         try:
-            tsq = func.plainto_tsquery(text("'english'"), search)
-            rank = func.ts_rank(Tender.search_vector, tsq)
+            rank = func.ts_rank(Tender.search_vector, combined_tsq)
             q = q.order_by(rank.desc(), Tender.id.desc())
         except AttributeError:
             q = q.order_by(_SORT_OPTIONS[_DEFAULT_SORT], Tender.id.desc())
