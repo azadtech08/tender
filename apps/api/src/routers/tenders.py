@@ -12,8 +12,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import TokenData, get_current_user
 from database import get_db
-from db_models import Job, Tender
+from db_models import COUNTER_TENDERS_EXPORTED, Job, Tender
 from schemas.tender import TenderListResponse, TenderResponse
+from services.license_enforcement import LicenseGuard, require_valid_license
+from services.license_features import (
+    FEATURE_EXPORT_XLSX,
+    LIMIT_TENDERS_EXPORTED_PER_MONTH,
+)
 from services.tender_export_service import generate_tender_xlsx
 from utils.s3 import download_file
 
@@ -95,6 +100,7 @@ async def list_ministries(
 async def list_tenders(
     current_user: Annotated[TokenData, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    guard: Annotated[LicenseGuard, Depends(require_valid_license)],  # noqa: ARG001
     job_id: int | None = Query(default=None),
     keyword: str | None = Query(default=None),
     search: str | None = Query(default=None),
@@ -176,6 +182,7 @@ async def list_tenders(
 async def export_tenders_xlsx(
     current_user: Annotated[TokenData, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    guard: Annotated[LicenseGuard, Depends(require_valid_license)],
     search: str | None = Query(default=None),
 ) -> Response:
     """Export all tenders as Excel file (.xlsx).
@@ -184,8 +191,14 @@ async def export_tenders_xlsx(
     File includes proper formatting: bold headers, filters, frozen top row, and auto-fit columns.
     Sorted by Bid End Date ascending.
     """
+    guard.require_feature(FEATURE_EXPORT_XLSX)
     try:
         xlsx_bytes = await generate_tender_xlsx(db, current_user.tenant_id, search)
+        await guard.check_and_increment(
+            db,
+            COUNTER_TENDERS_EXPORTED,
+            max_key=LIMIT_TENDERS_EXPORTED_PER_MONTH,
+        )
         timestamp = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M")
         filename = f"GeM_Tenders_{timestamp}.xlsx"
 

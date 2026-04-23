@@ -1,0 +1,5 @@
+# NEVER commit private signing keys.
+# Only the public verifying keys (signing_public_*.pem) are safe to commit.
+signing_private_*.pem
+*.key
+*.pem.enc

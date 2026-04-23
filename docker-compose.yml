@@ -62,6 +62,14 @@ services:
       S3_BUCKET: gem-tender-dev
       S3_ACCESS_KEY: ""
       S3_SECRET_KEY: ""
+      # Licensing (Phase 4+)
+      LICENSE_ACTIVE_KID: v1
+      LICENSE_PRIVATE_KEY_PATH: /keys/signing_private_v1.pem
+      LICENSE_PUBLIC_KEY_PATH: /keys/signing_public_v1.pem
+      # Local-dev admin allowlist for /api/admin/licenses (Phase 3)
+      LOCAL_ADMIN_USER_IDS: '["1"]'
+      # License enforcement mode — off | warn | enforce (Phase 5; Phase 0 §8)
+      LICENSING_MODE: "off"
     ports:
       - "8000:8000"
     depends_on:
@@ -72,7 +80,9 @@ services:
     volumes:
       - ./apps/api/src:/app/src
       - ./packages/db-models:/packages/db-models
+      - ./packages/licensing:/packages/licensing
       - F:/GeM_Tender_SaaS/data/pdfs:/pdfs
+      - F:/GeM_Tender_SaaS/data/keys:/keys:ro
     networks:
       - gem-network
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload --app-dir /app/src

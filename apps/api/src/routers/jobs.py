@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import TokenData, get_current_user, verify_token
 from database import get_db
-from db_models import Job, JobEvent, Schedule
+from db_models import COUNTER_RUNS, Job, JobEvent, Schedule
 from schemas.job import JobCreate, JobListResponse, JobResponse
 from services.job_service import (
     create_job,
@@ -21,6 +21,12 @@ from services.job_service import (
     dispatch_job,
     get_job,
     list_jobs,
+)
+from services.license_enforcement import LicenseGuard, require_valid_license
+from services.license_features import (
+    FEATURE_CREATE_JOBS,
+    FEATURE_SCHEDULE_JOBS,
+    LIMIT_RUNS_PER_MONTH,
 )
 
 router = APIRouter()
@@ -53,7 +59,10 @@ async def create_job_endpoint(
     data: JobCreate,
     current_user: Annotated[TokenData, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    guard: Annotated[LicenseGuard, Depends(require_valid_license)],
 ) -> JobResponse:
+    guard.require_feature(FEATURE_CREATE_JOBS)
+    await guard.check_and_increment(db, COUNTER_RUNS, max_key=LIMIT_RUNS_PER_MONTH)
     job = await create_job(db, current_user.tenant_id, data)
     return JobResponse.model_validate(job)
 
@@ -99,7 +108,10 @@ async def run_job_endpoint(
     job_id: int,
     current_user: Annotated[TokenData, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    guard: Annotated[LicenseGuard, Depends(require_valid_license)],
 ) -> JobResponse:
+    guard.require_feature(FEATURE_CREATE_JOBS)
+    await guard.check_and_increment(db, COUNTER_RUNS, max_key=LIMIT_RUNS_PER_MONTH)
     # Verify ownership first
     job = await get_job(db, current_user.tenant_id, job_id)
     if job.status in _TERMINAL_STATUSES or job.status == "running":
@@ -195,8 +207,10 @@ async def upsert_schedule(
     body: ScheduleUpsert,
     current_user: Annotated[TokenData, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    guard: Annotated[LicenseGuard, Depends(require_valid_license)],
 ) -> ScheduleResponse:
     """Create or update a daily recurring schedule for a job (time in IST)."""
+    guard.require_feature(FEATURE_SCHEDULE_JOBS)
     # Verify job ownership
     await get_job(db, current_user.tenant_id, job_id)
 
