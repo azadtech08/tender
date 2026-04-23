@@ -11,7 +11,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import TokenData, get_current_user
 from database import get_db
+from db_models import COUNTER_TENDERS_EXPORTED
 from services.export_service import generate_xlsx
+from services.license_enforcement import LicenseGuard, require_valid_license
+from services.license_features import (
+    FEATURE_EXPORT_XLSX,
+    LIMIT_TENDERS_EXPORTED_PER_MONTH,
+)
 from utils.s3 import generate_presigned_url, upload_file
 
 logger = structlog.get_logger(__name__)
@@ -28,8 +34,29 @@ async def download_xlsx(
     job_id: int,
     current_user: Annotated[TokenData, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
+    guard: Annotated[LicenseGuard, Depends(require_valid_license)],
 ) -> Response:
+    guard.require_feature(FEATURE_EXPORT_XLSX)
     xlsx_bytes = await generate_xlsx(db, job_id, current_user.tenant_id)
+    # Count rows after generating so we increment by the actual export size,
+    # not the request count. Falls back to 1 on parse failure.
+    try:
+        import openpyxl  # noqa: PLC0415 — local import keeps cold-start small
+        from io import BytesIO  # noqa: PLC0415
+
+        wb = openpyxl.load_workbook(BytesIO(xlsx_bytes), read_only=True)
+        ws = wb.active
+        # Subtract header row.
+        row_count = max(0, (ws.max_row or 1) - 1)
+        wb.close()
+    except Exception:
+        row_count = 1
+    await guard.check_and_increment(
+        db,
+        COUNTER_TENDERS_EXPORTED,
+        max_key=LIMIT_TENDERS_EXPORTED_PER_MONTH,
+        n=max(1, row_count),
+    )
     timestamp = datetime.now(tz=timezone.utc).strftime("%Y%m%d_%H%M")
     filename = f"Tenders_{job_id}_{timestamp}.xlsx"
 

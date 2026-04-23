@@ -9,7 +9,7 @@ from config import settings
 from database import create_tables
 from middleware.tenant import TenantMiddleware
 from routers import auth, billing, exports, health, jobs, tenders, webhooks
-from routers import alerts, api_keys, outbound_webhooks
+from routers import admin_licenses, alerts, api_keys, license as license_router, outbound_webhooks
 
 # Configure structured logging
 structlog.configure(
@@ -64,6 +64,8 @@ app.include_router(webhooks.router, prefix="/webhooks", tags=["Webhooks"])
 app.include_router(alerts.router, prefix="/api/alerts", tags=["Alerts"])
 app.include_router(api_keys.router, prefix="/api/api-keys", tags=["API Keys"])
 app.include_router(outbound_webhooks.router, prefix="/api/webhooks", tags=["Outbound Webhooks"])
+app.include_router(admin_licenses.router, prefix="/api/admin/licenses", tags=["Admin · Licenses"])
+app.include_router(license_router.router, prefix="/api/license", tags=["License · Client"])
 
 
 @app.on_event("startup")

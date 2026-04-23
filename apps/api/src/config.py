@@ -114,6 +114,62 @@ class Settings(BaseSettings):
         env="CORS_ORIGINS",
     )
 
+    # ── Licensing (Phase 3+) ──────────────────────────────────────────────────
+    # Active key ID used when signing newly minted license tokens.
+    license_active_kid: str = Field(default="v1", env="LICENSE_ACTIVE_KID")
+    # Path inside the container to the public verifying key (Phase 5 will use this).
+    license_public_key_path: str = Field(
+        default="/keys/signing_public_v1.pem",
+        env="LICENSE_PUBLIC_KEY_PATH",
+    )
+    # Path to private key on disk (dev). When unset, falls back to Secrets Manager.
+    license_private_key_path: Optional[str] = Field(
+        default=None,
+        env="LICENSE_PRIVATE_KEY_PATH",
+    )
+    # AWS Secrets Manager secret ID holding the private signing key (prod).
+    license_signing_key_secret_id: str = Field(
+        default="tenzo/licensing/signing_key_v1",
+        env="LICENSE_SIGNING_KEY_SECRET_ID",
+    )
+    # Token TTL — 30 days max (Phase 0 §3.2 LOCKED).
+    license_token_ttl_seconds: int = Field(
+        default=30 * 24 * 60 * 60, env="LICENSE_TOKEN_TTL_SECONDS"
+    )
+    # Heartbeat cadence — 6 hours (Phase 0 §3.1 LOCKED).
+    license_heartbeat_interval_seconds: int = Field(
+        default=6 * 60 * 60, env="LICENSE_HEARTBEAT_INTERVAL_SECONDS"
+    )
+    # Activation rate limits.
+    license_activate_rate_per_ip_per_min: int = Field(
+        default=5, env="LICENSE_ACTIVATE_RATE_PER_IP_PER_MIN"
+    )
+    license_activate_rate_per_key_per_day: int = Field(
+        default=10, env="LICENSE_ACTIVATE_RATE_PER_KEY_PER_DAY"
+    )
+
+    # ── Admin access control (Phase 3+) ───────────────────────────────────────
+    # Comma-separated CIDR list. Empty => skip IP check (dev convenience).
+    admin_ip_allowlist: list[str] = Field(
+        default_factory=list,
+        env="ADMIN_IP_ALLOWLIST",
+    )
+    # Comma-separated user IDs that count as admin in local-dev / test mode.
+    # In Clerk mode, role is read from public_metadata.role == 'tenzo_admin'.
+    local_admin_user_ids: list[str] = Field(
+        default_factory=list,
+        env="LOCAL_ADMIN_USER_IDS",
+    )
+    # Whether to require Clerk 2FA for admin endpoints (default off — flip in prod).
+    admin_require_2fa: bool = Field(default=False, env="ADMIN_REQUIRE_2FA")
+
+    # ── License enforcement mode (Phase 5+) ────────────────────────────────────
+    # 'off'     — no enforcement, every route passes (default; safe ship)
+    # 'warn'    — log denials, but still serve the request
+    # 'enforce' — 402/429 on license violations
+    # Phase 0 §8 rollout: ship 'off' → flip 'warn' for a week → flip 'enforce'.
+    licensing_mode: str = Field(default="off", env="LICENSING_MODE")
+
     @computed_field
     @property
     def is_production(self) -> bool:

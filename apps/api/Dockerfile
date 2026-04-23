@@ -11,9 +11,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install db-models (shared package) first
+# Install shared packages first (db-models + licensing)
 COPY packages/db-models /packages/db-models
-RUN pip install --no-cache-dir -e /packages/db-models
+COPY packages/licensing /packages/licensing
+RUN pip install --no-cache-dir -e /packages/db-models -e /packages/licensing
 
 # Install API dependencies directly (avoids broken file: reference in pyproject.toml)
 RUN pip install --no-cache-dir \
