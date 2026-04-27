@@ -11,8 +11,11 @@ Public endpoint (no Bearer auth). Protected by:
 
 from __future__ import annotations
 
+import json as _json
+import time as _time
 from datetime import datetime, timezone
-from typing import Annotated, Optional
+from functools import wraps
+from typing import Annotated, Any, Callable, Optional
 
 import structlog
 from fastapi import APIRouter, Depends, Request, Response, status
@@ -51,19 +54,76 @@ from schemas.license import (
 from services.license_cache import add_revoked
 from services.license_enforcement import _get_public_keys
 from services.license_keygen import hash_license_key, validate_license_key_format
+from services.license_metrics import (
+    license_activation_duration_seconds,
+    license_activations_total,
+    license_heartbeat_duration_seconds,
+    license_heartbeats_total,
+)
 from services.license_signer import get_signer
 from services.rate_limit import check_per_day, check_per_minute
-from tenzo_licensing import (
-    ExpiredLicenseError,
-    InvalidSignatureError,
-    LicenseError,
-    NotYetValidError,
-    UnknownKeyIdError,
-    verify_license,
-)
+try:
+    from tenzo_licensing import (
+        ExpiredLicenseError,
+        InvalidSignatureError,
+        LicenseError,
+        NotYetValidError,
+        UnknownKeyIdError,
+        verify_license,
+    )
+except ImportError:
+    class LicenseError(Exception): pass  # type: ignore[misc]
+    class ExpiredLicenseError(LicenseError): pass  # type: ignore[misc]
+    class InvalidSignatureError(LicenseError): pass  # type: ignore[misc]
+    class NotYetValidError(LicenseError): pass  # type: ignore[misc]
+    class UnknownKeyIdError(LicenseError): pass  # type: ignore[misc]
+    def verify_license(*a, **k): raise LicenseError("tenzo_licensing not installed")  # type: ignore[misc]
 
 logger = structlog.get_logger()
 router = APIRouter()
+
+
+# ── metrics decorator ────────────────────────────────────────────────────────
+
+
+def _instrument(counter, duration_hist) -> Callable:
+    """Decorator: count a FastAPI handler's outcomes and observe its duration.
+
+    Derives the Prometheus ``result`` label from the response:
+      * 2xx → ``"success"``
+      * everything else → body's ``error`` field if present, else ``"error"``
+
+    Metrics are observed in a finally block so they record even on exceptions.
+    """
+
+    def decorator(fn):
+        @wraps(fn)
+        async def wrapper(*args, **kwargs):
+            t0 = _time.monotonic()
+            result_label = "error"
+            try:
+                resp = await fn(*args, **kwargs)
+                status_code = getattr(resp, "status_code", 200)
+                if 200 <= status_code < 300:
+                    result_label = "success"
+                else:
+                    try:
+                        body = getattr(resp, "body", b"{}") or b"{}"
+                        result_label = _json.loads(body).get("error", "error")
+                    except Exception:
+                        pass
+                return resp
+            finally:
+                try:
+                    counter.labels(result=result_label).inc()
+                    duration_hist.observe(_time.monotonic() - t0)
+                except Exception:
+                    # Metrics must never break the request path.
+                    pass
+
+        return wrapper
+
+    return decorator
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -79,7 +139,18 @@ def _err(
     *,
     http_status: int,
     retry_after_seconds: Optional[int] = None,
+    metric: Optional[Any] = None,
 ) -> JSONResponse:
+    """Build a structured error response.
+
+    If ``metric`` is a Prometheus Counter, its ``{result}`` label is bumped
+    with the ``error`` code so callers get accurate Prometheus labels.
+    """
+    if metric is not None:
+        try:
+            metric.labels(result=error).inc()
+        except Exception:
+            pass  # metrics must never break the request path
     payload = LicenseErrorResponse(
         error=error,
         message=message,
@@ -143,6 +214,7 @@ async def _log_activation(
         500: {"model": LicenseErrorResponse},
     },
 )
+@_instrument(license_activations_total, license_activation_duration_seconds)
 async def activate_license(
     body: ActivateRequest,
     request: Request,
@@ -397,6 +469,7 @@ async def activate_license(
         429: {"model": LicenseErrorResponse},
     },
 )
+@_instrument(license_heartbeats_total, license_heartbeat_duration_seconds)
 async def heartbeat_license(
     body: HeartbeatRequest,
     request: Request,

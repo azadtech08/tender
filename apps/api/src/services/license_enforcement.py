@@ -34,17 +34,35 @@ from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
-from tenzo_licensing import (
-    ExpiredLicenseError,
-    InvalidSignatureError,
-    LicenseError,
-    LicensePayload,
-    NotYetValidError,
-    PublicKey,
-    UnknownKeyIdError,
-    load_public_key_from_file,
-    verify_license,
-)
+try:
+    from tenzo_licensing import (
+        ExpiredLicenseError,
+        InvalidSignatureError,
+        LicenseError,
+        LicensePayload,
+        NotYetValidError,
+        PublicKey,
+        UnknownKeyIdError,
+        load_public_key_from_file,
+        verify_license,
+    )
+    _LICENSING_SDK_AVAILABLE = True
+except ImportError:
+    _LICENSING_SDK_AVAILABLE = False
+
+    class LicenseError(Exception): pass  # type: ignore[no-redef]
+    class ExpiredLicenseError(LicenseError): pass  # type: ignore[no-redef]
+    class InvalidSignatureError(LicenseError): pass  # type: ignore[no-redef]
+    class NotYetValidError(LicenseError): pass  # type: ignore[no-redef]
+    class UnknownKeyIdError(LicenseError): pass  # type: ignore[no-redef]
+    class LicensePayload: pass  # type: ignore[no-redef]
+    class PublicKey: pass  # type: ignore[no-redef]
+
+    def load_public_key_from_file(*args, **kwargs):  # type: ignore[no-redef]
+        return None
+
+    def verify_license(*args, **kwargs):  # type: ignore[no-redef]
+        raise LicenseError("tenzo_licensing SDK not installed")
 
 from auth import TokenData, get_current_user
 from config import settings
@@ -56,6 +74,11 @@ from db_models import (
 )
 from services.license_cache import is_revoked
 from services.license_features import merge_features
+from services.license_metrics import (
+    license_enforcement_checks_total,
+    license_feature_denials_total,
+    license_usage_limit_denials_total,
+)
 
 logger = structlog.get_logger()
 
@@ -146,6 +169,12 @@ class LicenseGuard:
         if self.bypass:
             return
         if not self.features.get(feature):
+            try:
+                license_feature_denials_total.labels(
+                    plan=self.plan, feature=feature
+                ).inc()
+            except Exception:
+                pass
             if settings.licensing_mode == "warn":
                 logger.warning(
                     "license.feature_not_licensed_warn",
@@ -205,6 +234,12 @@ class LicenseGuard:
         current_count: int = current.scalar_one_or_none() or 0
 
         if max_value is not None and current_count + n > max_value:
+            try:
+                license_usage_limit_denials_total.labels(
+                    counter=counter, plan=self.plan
+                ).inc()
+            except Exception:
+                pass
             if settings.licensing_mode == "warn":
                 logger.warning(
                     "license.usage_limit_exceeded_warn",
@@ -295,6 +330,14 @@ def _expired_license_response(expires_at: datetime) -> HTTPException:
     )
 
 
+def _bump_check(mode: str, result: str) -> None:
+    """Best-effort metric increment — never raises."""
+    try:
+        license_enforcement_checks_total.labels(mode=mode, result=result).inc()
+    except Exception:
+        pass
+
+
 async def require_valid_license(
     user: Annotated[TokenData, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -309,6 +352,7 @@ async def require_valid_license(
     mode = settings.licensing_mode
 
     if mode == "off":
+        _bump_check(mode, "bypass")
         return LicenseGuard.unrestricted(user.tenant_id)
 
     now = datetime.now(tz=timezone.utc)
@@ -324,6 +368,7 @@ async def require_valid_license(
     lic = result.scalar_one_or_none()
 
     if lic is None:
+        _bump_check(mode, "deny_no_license")
         if mode == "warn":
             logger.warning(
                 "license.no_active_license_warn",
@@ -334,6 +379,7 @@ async def require_valid_license(
         raise _no_active_license_response()
 
     if lic.expires_at <= now:
+        _bump_check(mode, "deny_expired")
         if mode == "warn":
             logger.warning(
                 "license.expired_warn",
@@ -345,6 +391,7 @@ async def require_valid_license(
         raise _expired_license_response(lic.expires_at)
 
     if lic.not_before > now:
+        _bump_check(mode, "deny_not_yet_valid")
         if mode == "warn":
             logger.warning(
                 "license.not_yet_valid_warn",
@@ -362,6 +409,7 @@ async def require_valid_license(
             },
         )
 
+    _bump_check(mode, "allow")
     return LicenseGuard.from_license_row(lic)
 
 

@@ -36,5 +36,11 @@ celery_app.conf.beat_schedule = {
         "task":     "tasks.digest.send_daily_digests",
         "schedule": crontab(hour=2, minute=30),
     },
+    # Rebuild Redis license:revoked set from DB truth every 5 minutes.
+    # Covers naturally-expired licenses and any out-of-band status changes.
+    "license-cache-refresh": {
+        "task":     "tasks.license_cache_refresh.refresh",
+        "schedule": 300.0,
+    },
 }
 celery_app.conf.beat_scheduler = "celery.beat:PersistentScheduler"
