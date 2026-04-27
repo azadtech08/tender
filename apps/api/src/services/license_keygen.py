@@ -1,3 +1,4 @@
+
 """License key generation and validation.
 
 Format (Phase 0 §3.5 LOCKED):

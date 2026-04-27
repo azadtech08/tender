@@ -1,5 +1,5 @@
 import { UserButton } from "@clerk/nextjs";
-import { auth } from "@clerk/nextjs/server";
+import { auth, currentUser } from "@clerk/nextjs/server";
 import Image from "next/image";
 import Link from "next/link";
 import { redirect } from "next/navigation";
@@ -18,6 +18,11 @@ export default async function DashboardLayout({
 }) {
   const { userId } = auth();
   if (!userId) redirect("/sign-in");
+
+  // Show an Admin link only to users with the tenzo_admin role.
+  const user = await currentUser();
+  const isAdmin =
+    (user?.publicMetadata as { role?: string } | undefined)?.role === "tenzo_admin";
 
   return (
     <div className="min-h-screen flex relative z-10">
@@ -52,6 +57,20 @@ export default async function DashboardLayout({
               <span className="font-medium">{link.label}</span>
             </Link>
           ))}
+          {isAdmin && (
+            <Link
+              href="/admin/licenses"
+              className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors mt-4"
+              style={{
+                color: "#F87171",
+                borderTop: "1px dashed var(--border)",
+                paddingTop: "14px",
+              }}
+            >
+              <span className="text-base leading-none">🔑</span>
+              <span className="font-medium">Admin · Licenses</span>
+            </Link>
+          )}
         </nav>
 
         {/* User */}

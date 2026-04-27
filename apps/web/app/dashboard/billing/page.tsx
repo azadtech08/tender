@@ -3,7 +3,7 @@
 import { useAuth } from "@clerk/nextjs";
 import { useEffect, useState } from "react";
 
-const API = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+const API = "/api-backend";
 
 const PLANS = [
   { id: "free",     name: "Free",     price: "₹0",       features: ["3 runs/month", "50 tenders/run"] },

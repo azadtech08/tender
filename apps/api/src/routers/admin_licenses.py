@@ -57,6 +57,14 @@ from schemas.license import (
     LicenseSuspend,
 )
 from services.admin_audit import write_admin_audit
+from services.license_abuse_detection import (
+    SuspiciousIP,
+    SuspiciousLicense,
+    activity_summary,
+    fingerprint_churn,
+    invalid_key_spike,
+    rapid_reactivation,
+)
 from services.license_cache import add_revoked, remove_revoked
 from services.license_keygen import (
     generate_fingerprint_salt,
@@ -423,6 +431,64 @@ async def extend_license(
     await db.commit()
     await db.refresh(lic)
     return LicenseResponse.model_validate(lic)
+
+
+# ── Phase 7: admin stats endpoints ──────────────────────────────────────────
+
+
+@router.get("/stats/summary")
+async def get_stats_summary(
+    admin: Annotated[TokenData, Depends(get_admin_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+) -> dict:
+    """High-level activity dashboard: counts of activations/heartbeats/denials."""
+    return await activity_summary(db)
+
+
+@router.get("/stats/suspicious")
+async def get_stats_suspicious(
+    admin: Annotated[TokenData, Depends(get_admin_user)],
+    db: Annotated[AsyncSession, Depends(get_db)],
+    window_hours: int = Query(default=24, ge=1, le=168),
+) -> dict:
+    """Licenses matching abuse heuristics + IPs hammering INVALID_KEY.
+
+    Not an alert — a query surface. Wire your ops alerting (Alertmanager,
+    Sentry) to Prometheus metrics for actual paging.
+    """
+    churn = await fingerprint_churn(db, window_hours=window_hours)
+    rapid = await rapid_reactivation(db, window_hours=window_hours)
+    invalid_ips = await invalid_key_spike(db, window_hours=1)
+
+    def _lic(rows: list[SuspiciousLicense]) -> list[dict]:
+        return [
+            {
+                "license_id": r.license_id,
+                "tenant_id": r.tenant_id,
+                "plan": r.plan,
+                "fingerprint_count_24h": r.fingerprint_count_24h,
+                "activation_count_24h": r.activation_count_24h,
+                "last_event_at": r.last_event_at.isoformat() if r.last_event_at else None,
+            }
+            for r in rows
+        ]
+
+    def _ip(rows: list[SuspiciousIP]) -> list[dict]:
+        return [
+            {
+                "ip": r.ip,
+                "invalid_key_count_1h": r.invalid_key_count_1h,
+                "distinct_key_prefixes": r.distinct_key_prefixes,
+            }
+            for r in rows
+        ]
+
+    return {
+        "window_hours": window_hours,
+        "fingerprint_churn": _lic(churn),
+        "rapid_reactivation": _lic(rapid),
+        "invalid_key_spike": _ip(invalid_ips),
+    }
 
 
 # ── 10. POST /api/admin/licenses/{id}/devices/{did}/revoke ──────────────────
