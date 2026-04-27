@@ -9,7 +9,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - F:/GeM_Tender_SaaS/data/postgres:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U gem -d gem_tender"]
       interval: 10s
@@ -24,7 +24,7 @@ services:
     ports:
       - "6379:6379"
     volumes:
-      - F:/GeM_Tender_SaaS/data/redis:/data
+      - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -81,8 +81,8 @@ services:
       - ./apps/api/src:/app/src
       - ./packages/db-models:/packages/db-models
       - ./packages/licensing:/packages/licensing
-      - F:/GeM_Tender_SaaS/data/pdfs:/pdfs
-      - F:/GeM_Tender_SaaS/data/keys:/keys:ro
+      - /data/pdfs_data:/pdfs
+      - /data/keys:/keys:ro
     networks:
       - gem-network
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload --app-dir /app/src
@@ -106,7 +106,7 @@ services:
     volumes:
       - ./apps/worker/src:/app/src
       - ./packages/db-models:/packages/db-models
-      - F:/GeM_Tender_SaaS/data/pdfs:/pdfs
+      - pdfs_data:/pdfs
     networks:
       - gem-network
 
@@ -156,8 +156,9 @@ services:
       - api
 
 volumes:
-  # pgdata removed — Postgres data is bind-mounted to F:/GeM_Tender_SaaS/data/postgres
-  # redis data is bind-mounted to F:/GeM_Tender_SaaS/data/redis
+  postgres_data:
+  redis_data:
+  pdfs_data:
   web_node_modules:
     driver: local
 
