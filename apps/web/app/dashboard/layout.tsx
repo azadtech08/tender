@@ -3,6 +3,7 @@ import { auth, currentUser } from "@clerk/nextjs/server";
 import Image from "next/image";
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import LicenseGuard from "@/components/LicenseGuard";
 
 const NAV_LINKS = [
   { href: "/dashboard",          label: "Jobs",     icon: "⚡" },
@@ -25,6 +26,7 @@ export default async function DashboardLayout({
     (user?.publicMetadata as { role?: string } | undefined)?.role === "tenzo_admin";
 
   return (
+    <LicenseGuard>
     <div className="min-h-screen flex relative z-10">
       {/* Sidebar */}
       <aside
@@ -117,5 +119,6 @@ export default async function DashboardLayout({
         <main className="flex-1 p-8 overflow-y-auto">{children}</main>
       </div>
     </div>
+    </LicenseGuard>
   );
 }
