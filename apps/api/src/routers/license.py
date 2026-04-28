@@ -23,7 +23,6 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from auth import TokenData, get_current_user
 from auth_admin import get_client_ip
 from config import settings
 from database import get_db
@@ -662,60 +661,3 @@ async def heartbeat_license(
         ).model_dump(mode="json"),
         status_code=status.HTTP_200_OK,
     )
-
-
-# ── GET /api/license/status ──────────────────────────────────────────────────
-
-
-@router.get("/status")
-async def license_status(
-    current_user: Annotated[TokenData, Depends(get_current_user)],
-    db: Annotated[AsyncSession, Depends(get_db)],
-) -> JSONResponse:
-    """Return the active license for the caller's tenant.
-
-    Two-pass lookup (no RLS — uses get_db):
-      1. License.tenant_id == JWT tenant_id (org-assigned license)
-      2. LicenseDevice.fingerprint == JWT user_id (self-activated key)
-    """
-    now = _now()
-
-    # Pass 1 — license explicitly assigned to this tenant
-    result = await db.execute(
-        select(License).where(
-            License.tenant_id == current_user.tenant_id,
-            License.status == STATUS_ACTIVE,
-            License.expires_at > now,
-        )
-    )
-    lic: Optional[License] = result.scalar_one_or_none()
-
-    # Pass 2 — user activated a key themselves (fingerprint == Clerk user_id)
-    if lic is None:
-        device_res = await db.execute(
-            select(LicenseDevice)
-            .join(License, LicenseDevice.license_id == License.id)
-            .where(
-                LicenseDevice.fingerprint == current_user.user_id,
-                LicenseDevice.revoked_at.is_(None),
-                License.status == STATUS_ACTIVE,
-                License.expires_at > now,
-            )
-        )
-        device = device_res.scalar_one_or_none()
-        if device is not None:
-            lic_res = await db.execute(
-                select(License).where(License.id == device.license_id)
-            )
-            lic = lic_res.scalar_one_or_none()
-
-    if lic is None:
-        return JSONResponse(content={"active": False, "plan": None, "expires_at": None})
-
-    return JSONResponse(content={
-        "active": True,
-        "plan": lic.plan,
-        "expires_at": lic.expires_at.isoformat(),
-        "features": dict(lic.features or {}),
-        "license_id": lic.id,
-    })
