@@ -9,7 +9,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - F:/GeM_Tender_SaaS/data/postgres:/var/lib/postgresql/data
+      - D:/TENZO/data/postgres:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U gem -d gem_tender"]
       interval: 10s
@@ -24,7 +24,7 @@ services:
     ports:
       - "6379:6379"
     volumes:
-      - F:/GeM_Tender_SaaS/data/redis:/data
+      - D:/TENZO/data/redis:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -82,8 +82,8 @@ services:
       - ./apps/api/scripts:/app/scripts
       - ./packages/db-models:/packages/db-models
       - ./packages/licensing:/packages/licensing
-      - F:/GeM_Tender_SaaS/data/pdfs:/pdfs
-      - F:/GeM_Tender_SaaS/data/keys:/keys:ro
+      - D:/TENZO/data/pdfs:/pdfs
+      - D:/TENZO/data/keys:/keys:ro
     networks:
       - gem-network
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload --app-dir /app/src
@@ -107,7 +107,7 @@ services:
     volumes:
       - ./apps/worker/src:/app/src
       - ./packages/db-models:/packages/db-models
-      - F:/GeM_Tender_SaaS/data/pdfs:/pdfs
+      - D:/TENZO/data/pdfs:/pdfs
     networks:
       - gem-network
 
@@ -160,8 +160,8 @@ services:
       - api
 
 volumes:
-  # pgdata removed — Postgres data is bind-mounted to F:/GeM_Tender_SaaS/data/postgres
-  # redis data is bind-mounted to F:/GeM_Tender_SaaS/data/redis
+  # pgdata removed — Postgres data is bind-mounted to F:/TENZO/data/postgres
+  # redis data is bind-mounted to F:/TENZO/data/redis
   web_node_modules:
     driver: local
 
