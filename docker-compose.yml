@@ -10,6 +10,7 @@ services:
       - "5432:5432"
     volumes:
       - D:/TENZO/data/postgres:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U gem -d gem_tender"]
       interval: 10s
@@ -51,12 +52,16 @@ services:
       CLERK_JWKS_URL: "https://firm-stallion-78.clerk.accounts.dev/.well-known/jwks.json"
       CLERK_ISSUER: "https://firm-stallion-78.clerk.accounts.dev"
       CLERK_SECRET_KEY: "sk_test_XG8BXk5PXcnUPmrRtnRzznYA4vumvT4p4YUFI0kjhM"
-      # Stripe — leave blank to disable billing in local dev
-      STRIPE_SECRET_KEY: ""
-      STRIPE_WEBHOOK_SECRET: ""
-      STRIPE_PRICE_STARTER: ""
-      STRIPE_PRICE_PRO: ""
-      STRIPE_PRICE_BUSINESS: ""
+
+      # PhonePe Business Payment Gateway — OAuth 2.0 new API (Test Mode)
+      # PhonePe Business Dashboard → Developer Settings → API Keys
+      PHONEPE_CLIENT_ID: "M23ZJ2OVPWFJV_2603070950"
+      PHONEPE_CLIENT_SECRET: "M2NhNWFjYWMtOTFmYS00NTc3LTg2OTYtMTU2MWJkMDEwODE3"
+      PHONEPE_CLIENT_VERSION: "1"
+      PHONEPE_AUTH_BASE_URL: "https://api-preprod.phonepe.com/apis"
+      PHONEPE_PG_BASE_URL: "https://api-preprod.phonepe.com/apis/pg-sandbox"
+      # ngrok tunnel so PhonePe can POST callbacks to your local machine
+      PHONEPE_WEBHOOK_BASE_URL: "https://cataclinal-draven-unbeaming.ngrok-free.dev"
       # Cloudflare R2 (optional for local dev)
       S3_ENDPOINT: ""
       S3_BUCKET: gem-tender-dev
@@ -79,6 +84,7 @@ services:
         condition: service_healthy
     volumes:
       - ./apps/api/src:/app/src
+      - ./apps/api/alembic:/app/alembic
       - ./apps/api/scripts:/app/scripts
       - ./packages/db-models:/packages/db-models
       - ./packages/licensing:/packages/licensing
@@ -108,6 +114,7 @@ services:
       - ./apps/worker/src:/app/src
       - ./packages/db-models:/packages/db-models
       - D:/TENZO/data/pdfs:/pdfs
+      - pdfs_data:/pdfs
     networks:
       - gem-network
 
@@ -160,8 +167,9 @@ services:
       - api
 
 volumes:
-  # pgdata removed — Postgres data is bind-mounted to F:/TENZO/data/postgres
-  # redis data is bind-mounted to F:/TENZO/data/redis
+  postgres_data:
+  redis_data:
+  pdfs_data:
   web_node_modules:
     driver: local
 
