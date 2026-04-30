@@ -11,11 +11,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install shared packages first (db-models + licensing)
-COPY packages/db-models /packages/db-models
-COPY packages/licensing /packages/licensing
-RUN pip install --no-cache-dir -e /packages/db-models -e /packages/licensing
-
 # Install API dependencies directly (avoids broken file: reference in pyproject.toml)
 RUN pip install --no-cache-dir \
     "fastapi>=0.104.0" \
@@ -36,7 +31,16 @@ RUN pip install --no-cache-dir \
     "stripe>=7.0" \
     "alembic>=1.13" \
     "psycopg2-binary>=2.9" \
-    "boto3>=1.34"
+    "boto3>=1.34" \
+    "prometheus-client>=0.20" \
+    "pyseto>=1.7" \
+    "cryptography>=42"
+
+# Install shared packages (db-models + licensing) — regular install so they
+# land in site-packages and are unaffected by volume mounts at runtime
+COPY packages/db-models /packages/db-models
+COPY packages/licensing /packages/licensing
+RUN pip install --no-cache-dir -e /packages/db-models -e /packages/licensing
 
 # Copy source last (code changes won't bust the pip cache layer)
 COPY apps/api/src /app/src

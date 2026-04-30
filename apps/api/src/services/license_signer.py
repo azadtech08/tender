@@ -21,13 +21,22 @@ from pathlib import Path
 from typing import Optional
 
 import structlog
-from tenzo_licensing import (
-    DeviceBindingMode,
-    LicensePayload,
-    PrivateKey,
-    load_private_key,
-    sign_license,
-)
+try:
+    from tenzo_licensing import (
+        DeviceBindingMode,
+        LicensePayload,
+        PrivateKey,
+        load_private_key,
+        sign_license,
+    )
+    _TENZO_AVAILABLE = True
+except ImportError:
+    _TENZO_AVAILABLE = False
+    class DeviceBindingMode: FINGERPRINT = "fingerprint"  # type: ignore[misc]
+    class LicensePayload: pass  # type: ignore[misc]
+    class PrivateKey: pass  # type: ignore[misc]
+    def load_private_key(*a, **k): return None  # type: ignore[misc]
+    def sign_license(*a, **k): raise RuntimeError("tenzo_licensing not installed")  # type: ignore[misc]
 
 from config import settings
 from db_models import License

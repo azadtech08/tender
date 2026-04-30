@@ -9,7 +9,8 @@ from config import settings
 from database import create_tables
 from middleware.tenant import TenantMiddleware
 from routers import auth, billing, exports, health, jobs, tenders, webhooks
-from routers import admin_licenses, alerts, api_keys, license as license_router, outbound_webhooks
+from routers import admin_licenses, alerts, api_keys, license as license_router, metrics as metrics_router, outbound_webhooks
+from routers.phonepe import billing_router as phonepe_billing_router, webhook_router as phonepe_webhook_router
 
 # Configure structured logging
 structlog.configure(
@@ -60,12 +61,15 @@ app.include_router(jobs.router, prefix="/api/jobs", tags=["Jobs"])
 app.include_router(tenders.router, prefix="/api/tenders", tags=["Tenders"])
 app.include_router(exports.router, prefix="/api/exports", tags=["Exports"])
 app.include_router(billing.router, prefix="/api/billing", tags=["Billing"])
+app.include_router(phonepe_billing_router, prefix="/api/billing/phonepe", tags=["PhonePe Billing"])
 app.include_router(webhooks.router, prefix="/webhooks", tags=["Webhooks"])
+app.include_router(phonepe_webhook_router, prefix="/webhooks", tags=["PhonePe Webhooks"])
 app.include_router(alerts.router, prefix="/api/alerts", tags=["Alerts"])
 app.include_router(api_keys.router, prefix="/api/api-keys", tags=["API Keys"])
 app.include_router(outbound_webhooks.router, prefix="/api/webhooks", tags=["Outbound Webhooks"])
 app.include_router(admin_licenses.router, prefix="/api/admin/licenses", tags=["Admin · Licenses"])
 app.include_router(license_router.router, prefix="/api/license", tags=["License · Client"])
+app.include_router(metrics_router.router, tags=["Observability"])
 
 
 @app.on_event("startup")

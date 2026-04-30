@@ -76,6 +76,38 @@ class Settings(BaseSettings):
         default=None, env="STRIPE_PRICE_AI_METER"
     )
 
+    # ── PhonePe Business Payment Gateway (OAuth 2.0 / new API) ──────────────
+    # Credentials from PhonePe Business → Developer Settings → API Keys
+    phonepe_client_id: Optional[str] = Field(
+        default=None, env="PHONEPE_CLIENT_ID"
+    )
+    phonepe_client_secret: Optional[str] = Field(
+        default=None, env="PHONEPE_CLIENT_SECRET"
+    )
+    # client_version is shown next to the client secret in the dashboard (usually 1)
+    phonepe_client_version: int = Field(
+        default=1, env="PHONEPE_CLIENT_VERSION"
+    )
+    # OAuth token endpoint base:
+    #   Test: https://api-preprod.phonepe.com/apis/pg-sandbox
+    #   Prod: https://api.phonepe.com/apis
+    phonepe_auth_base_url: str = Field(
+        default="https://api-preprod.phonepe.com/apis/pg-sandbox",
+        env="PHONEPE_AUTH_BASE_URL",
+    )
+    # Payment API base:
+    #   Test: https://api-preprod.phonepe.com/apis/pg-sandbox
+    #   Prod: https://api.phonepe.com/apis/pg
+    phonepe_pg_base_url: str = Field(
+        default="https://api-preprod.phonepe.com/apis/pg-sandbox",
+        env="PHONEPE_PG_BASE_URL",
+    )
+    # Public base URL that PhonePe can POST webhooks to (may differ from APP_BASE_URL
+    # when running locally — set to your ngrok URL during development)
+    phonepe_webhook_base_url: Optional[str] = Field(
+        default=None, env="PHONEPE_WEBHOOK_BASE_URL"
+    )
+
     # ── S3 / Cloudflare R2 storage ────────────────────────────────────────────
     s3_endpoint: Optional[str] = Field(default=None, env="S3_ENDPOINT")
     s3_bucket: str = Field(default="gem-tender-dev", env="S3_BUCKET")
