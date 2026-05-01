@@ -1,9 +1,9 @@
-"""Subscription model — tracks Stripe subscription state per tenant."""
+"""Subscription model — tracks plan state per tenant."""
 
 from datetime import datetime
 from typing import Optional
 
-from sqlalchemy import String, DateTime, Index
+from sqlalchemy import String, DateTime
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .base import Base, TimestampMixin
@@ -28,13 +28,12 @@ PLAN_RUN_LIMITS: dict[str, Optional[int]] = {
 
 
 class Subscription(Base, TimestampMixin):
-    """Stripe subscription state for a tenant.
+    """Plan subscription state for a tenant.
 
     One row per tenant. Created automatically when a tenant first registers
-    (plan = free, no Stripe IDs). Updated by Stripe webhook events.
+    (plan = free). Updated by PhonePe payment webhook events.
 
-    Status values mirror Stripe: active, trialing, past_due, cancelled,
-    incomplete, incomplete_expired, unpaid.
+    Status values: active, trialing, past_due, cancelled.
     """
 
     __tablename__ = "subscriptions"
@@ -42,14 +41,6 @@ class Subscription(Base, TimestampMixin):
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     tenant_id: Mapped[str] = mapped_column(
         String(64), nullable=False, unique=True, index=True
-    )
-
-    # Stripe identifiers (null for free plan / before checkout).
-    stripe_customer_id: Mapped[Optional[str]] = mapped_column(
-        String(64), nullable=True, index=True
-    )
-    stripe_subscription_id: Mapped[Optional[str]] = mapped_column(
-        String(64), nullable=True, unique=True
     )
 
     plan: Mapped[str] = mapped_column(
@@ -63,10 +54,6 @@ class Subscription(Base, TimestampMixin):
     )
     cancel_at_period_end: Mapped[bool] = mapped_column(
         default=False, nullable=False
-    )
-
-    __table_args__ = (
-        Index("ix_subscriptions_stripe_customer", "stripe_customer_id"),
     )
 
     def __repr__(self) -> str:

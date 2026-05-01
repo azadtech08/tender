@@ -58,7 +58,7 @@ services:
       PHONEPE_CLIENT_ID: "M23ZJ2OVPWFJV_2603070950"
       PHONEPE_CLIENT_SECRET: "M2NhNWFjYWMtOTFmYS00NTc3LTg2OTYtMTU2MWJkMDEwODE3"
       PHONEPE_CLIENT_VERSION: "1"
-      PHONEPE_AUTH_BASE_URL: "https://api-preprod.phonepe.com/apis"
+      PHONEPE_AUTH_BASE_URL: "https://api-preprod.phonepe.com/apis/pg-sandbox"
       PHONEPE_PG_BASE_URL: "https://api-preprod.phonepe.com/apis/pg-sandbox"
       # ngrok tunnel so PhonePe can POST callbacks to your local machine
       PHONEPE_WEBHOOK_BASE_URL: "https://cataclinal-draven-unbeaming.ngrok-free.dev"
