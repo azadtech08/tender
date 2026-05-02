@@ -40,6 +40,7 @@ RUN pip install --no-cache-dir \
 COPY packages/db-models /packages/db-models
 COPY packages/licensing /packages/licensing
 RUN pip install --no-cache-dir -e /packages/db-models -e /packages/licensing
+RUN pip install --no-cache-dir /packages/db-models /packages/licensing
 
 # Copy source last (code changes won't bust the pip cache layer)
 COPY apps/api/src /app/src
