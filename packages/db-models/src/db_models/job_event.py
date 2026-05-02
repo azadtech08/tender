@@ -1,5 +1,7 @@
 """JobEvent model — audit log entries for jobs."""
 
+from datetime import datetime
+
 from sqlalchemy import String, ForeignKey, Index, DateTime, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -31,7 +33,7 @@ class JobEvent(Base):
     )
     event_type: Mapped[str] = mapped_column(String(30), nullable=False)
     payload: Mapped[dict] = mapped_column(JSONB, default={}, nullable=False)
-    created_at: Mapped[dict] = mapped_column(
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         server_default=func.now(),
         nullable=False,

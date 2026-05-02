@@ -156,7 +156,7 @@ export default function JobDetailPage() {
   const [ministries, setMinistries] = useState<string[]>([]);
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
 
-  const esRef     = useRef<EventSource | null>(null);
+  const pollRef   = useRef<ReturnType<typeof setInterval> | null>(null);
   const logEndRef = useRef<HTMLDivElement>(null);
 
   // ── Data fetching ────────────────────────────────────────────────────────────
@@ -191,48 +191,58 @@ export default function JobDetailPage() {
     if (res.ok) setMinistries(await res.json());
   }
 
-  // ── SSE stream ───────────────────────────────────────────────────────────────
+  // ── Polling (replaces SSE — Next.js dev proxy buffers SSE chunks) ─────────────
 
-  async function startStream() {
-    if (esRef.current) return;
-    const token = await getToken();
-    const url = `${API}/api/jobs/${jobId}/events?token=${encodeURIComponent(token!)}`;
-    const es = new EventSource(url);
-    esRef.current = es;
+  function pushLog(event: string, payload: Record<string, unknown>) {
+    setLog((prev) => [
+      ...prev,
+      { event, payload, time: new Date().toLocaleTimeString("en-IN", { hour12: false }) },
+    ]);
+  }
 
-    const push = (event: string, raw: string) => {
-      let payload: Record<string, unknown> = {};
-      try { payload = JSON.parse(raw); } catch { /* ignore */ }
-      setLog((prev) => [
-        ...prev,
-        { event, payload, time: new Date().toLocaleTimeString("en-IN", { hour12: false }) },
-      ]);
-    };
-
-    const EVENTS = [
-      "status_change", "keyword_start", "cards_found",
-      "card_scraped", "pdf_parsed", "keyword_done", "complete", "error",
-      "search_retry", "search_failed",
-    ];
-
-    for (const ev of EVENTS) {
-      es.addEventListener(ev, (e: MessageEvent) => {
-        push(ev, e.data);
-        if (ev === "keyword_done" || ev === "status_change") fetchJob();
-        if (ev === "complete" || ev === "error") {
-          es.close();
-          esRef.current = null;
-          fetchJob();
-          fetchTenders();
-        }
-      });
+  function stopPolling() {
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
     }
+  }
 
-    es.onerror = () => {
-      push("error", JSON.stringify({ message: "SSE connection lost" }));
-      es.close();
-      esRef.current = null;
-    };
+  function startPolling(initialStatus: string, initialDone: number) {
+    if (pollRef.current) return;
+    let lastStatus = initialStatus;
+    let lastDone   = initialDone;
+
+    pollRef.current = setInterval(async () => {
+      const j = await fetchJob();
+      if (!j) return;
+
+      // Emit a log line when keywords progress
+      if ((j.done_keywords ?? 0) > lastDone) {
+        lastDone = j.done_keywords ?? 0;
+        pushLog("keyword_done", {
+          count: lastDone,
+          total: j.total_keywords,
+          total_tenders: j.total_tenders,
+        });
+      }
+
+      // Emit a log line on status change
+      if (j.status !== lastStatus) {
+        lastStatus = j.status;
+        pushLog("status_change", { status: j.status });
+      }
+
+      // Stop and load results when terminal
+      if (j.status === "completed" || j.status === "failed" || j.status === "cancelled") {
+        stopPolling();
+        await fetchTenders();
+        await fetchMinistries();
+        pushLog(j.status === "completed" ? "complete" : "error", {
+          total_tenders: j.total_tenders,
+          message: j.error_message ?? undefined,
+        });
+      }
+    }, 2000);
   }
 
   // ── Init ─────────────────────────────────────────────────────────────────────
@@ -243,11 +253,11 @@ export default function JobDetailPage() {
       await Promise.all([fetchTenders(), fetchMinistries()]);
       setLoading(false);
       if (j && (j.status === "running" || j.status === "queued")) {
-        startStream();
+        startPolling(j.status, j.done_keywords ?? 0);
       }
     }
     init();
-    return () => { esRef.current?.close(); };
+    return () => { stopPolling(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobId]);
 
@@ -278,7 +288,9 @@ export default function JobDetailPage() {
     });
     setLog([]);
     const j = await fetchJob();
-    if (j && (j.status === "running" || j.status === "queued")) startStream();
+    if (j && (j.status === "running" || j.status === "queued")) {
+      startPolling(j.status, j.done_keywords ?? 0);
+    }
   }
 
   async function handleDownload(url: string, filename: string) {
