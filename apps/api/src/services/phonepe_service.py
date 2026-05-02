@@ -1,29 +1,24 @@
-"""PhonePe Business Payment Gateway service — X-VERIFY / SHA256 checksum API.
+"""PhonePe Business Payment Gateway service — OAuth 2.0 new API.
 
-PhonePe uses Merchant ID + Salt Key + Salt Index for authentication.
-The dashboard labels these as "Client ID", "Client Secret", and "Client Version"
-but the underlying API still uses the X-VERIFY SHA256 checksum approach.
-
-Checksum rules:
-  Pay initiation : SHA256(base64(payload) + "/pg/v1/pay" + saltKey) + "###" + saltIndex
-  Status check   : SHA256("/pg/v1/status/" + merchantId + "/" + txnId + saltKey) + "###" + saltIndex
-  Webhook verify : SHA256(base64Response + saltKey) + "###" + saltIndex
-
-Environment variables (see config.py):
-  PHONEPE_CLIENT_ID      — Merchant ID from PhonePe dashboard (shown as "Client ID")
-  PHONEPE_CLIENT_SECRET  — Salt Key from PhonePe dashboard (shown as "Client Secret")
-  PHONEPE_CLIENT_VERSION — Salt Index (shown as "Client Version", usually "1")
-  PHONEPE_PG_BASE_URL    — https://api-preprod.phonepe.com/apis/pg-sandbox  (test)
-                           https://api.phonepe.com/apis/hermes               (prod)
+Credentials from PhonePe Business Dashboard → Developer Settings → API Keys:
+  PHONEPE_CLIENT_ID      — Client ID (NOT merchant ID)
+  PHONEPE_CLIENT_SECRET  — Client Secret
+  PHONEPE_CLIENT_VERSION — Client Version (usually 1)
+  PHONEPE_AUTH_BASE_URL  — Token endpoint base
+                           Test: https://api-preprod.phonepe.com/apis/pg-sandbox
+                           Prod: https://api.phonepe.com/apis/pg
+  PHONEPE_PG_BASE_URL    — Payment API base
+                           Test: https://api-preprod.phonepe.com/apis/pg-sandbox
+                           Prod: https://api.phonepe.com/apis/pg
   PHONEPE_WEBHOOK_BASE_URL — public URL PhonePe can POST to (ngrok in dev)
 """
 
 from __future__ import annotations
 
-import base64
 import hashlib
 import hmac
 import json
+import time
 import uuid
 from typing import Optional
 
@@ -44,37 +39,51 @@ from db_models.phonepe_transaction import (
 
 logger = structlog.get_logger(__name__)
 
-_PAY_PATH      = "/pg/v1/pay"
-_STATUS_PATH   = "/pg/v1/status"
+_TOKEN_PATH  = "/v1/oauth/token"
+_PAY_PATH    = "/checkout/v2/pay"
+_ORDER_PATH  = "/checkout/v2/order"   # status: {base}/{_ORDER_PATH}/{merchantOrderId}/status
+
+# In-process token cache: reuse until 60s before expiry
+_token_cache: dict = {"access_token": None, "expires_at": 0}
 
 
-# ── Checksum helpers ──────────────────────────────────────────────────────────
+# ── OAuth token management ────────────────────────────────────────────────────
 
-def _sha256(text: str) -> str:
-    return hashlib.sha256(text.encode()).hexdigest()
+async def _get_access_token() -> str:
+    now_ms = int(time.time() * 1000)
+    if _token_cache["access_token"] and _token_cache["expires_at"] > now_ms + 60_000:
+        return _token_cache["access_token"]
+
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        resp = await client.post(
+            f"{settings.phonepe_auth_base_url}{_TOKEN_PATH}",
+            data={
+                "client_id": settings.phonepe_client_id,
+                "client_secret": settings.phonepe_client_secret,
+                "client_version": str(settings.phonepe_client_version),
+                "grant_type": "client_credentials",
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+    resp.raise_for_status()
+    data = resp.json()
+    _token_cache["access_token"] = data["access_token"]
+    # PhonePe returns expiresAt in milliseconds (epoch)
+    _token_cache["expires_at"] = data.get("expiresAt", now_ms + 1_800_000)
+    return _token_cache["access_token"]
 
 
-def _salt_index() -> str:
-    return str(settings.phonepe_client_version)
-
-
-def _pay_checksum(base64_payload: str) -> str:
-    raw = base64_payload + _PAY_PATH + settings.phonepe_client_secret
-    return _sha256(raw) + "###" + _salt_index()
-
-
-def _status_checksum(merchant_transaction_id: str) -> str:
-    path = f"{_STATUS_PATH}/{settings.phonepe_client_id}/{merchant_transaction_id}"
-    return _sha256(path + settings.phonepe_client_secret) + "###" + _salt_index()
-
-
-def _webhook_checksum(base64_response: str) -> str:
-    raw = base64_response + settings.phonepe_client_secret
-    return _sha256(raw) + "###" + _salt_index()
-
-
-def _new_merchant_transaction_id() -> str:
+def _new_merchant_order_id() -> str:
     return "MT" + uuid.uuid4().hex[:30].upper()
+
+
+# ── Webhook signature helper ──────────────────────────────────────────────────
+
+def _webhook_checksum(payload_str: str) -> str:
+    """New API: SHA256(payload_string + client_secret) + '###' + client_version."""
+    raw = payload_str + settings.phonepe_client_secret
+    digest = hashlib.sha256(raw.encode()).hexdigest()
+    return digest + "###" + str(settings.phonepe_client_version)
 
 
 # ── Payment initiation ────────────────────────────────────────────────────────
@@ -87,55 +96,55 @@ async def initiate_payment(
     callback_url: str,
     mobile_number: Optional[str] = None,
 ) -> tuple[str, str]:
-    """Initiate a PhonePe payment. Returns (merchant_transaction_id, redirect_url)."""
+    """Initiate a PhonePe payment. Returns (merchant_order_id, redirect_url)."""
     amount = PHONEPE_PLAN_AMOUNTS.get(plan)
     if amount is None:
         raise ValueError(f"No PhonePe price configured for plan '{plan}'")
 
-    merchant_transaction_id = _new_merchant_transaction_id()
+    merchant_order_id = _new_merchant_order_id()
 
     payload: dict = {
-        "merchantId": settings.phonepe_client_id,
-        "merchantTransactionId": merchant_transaction_id,
-        "merchantUserId": f"UID{tenant_id[:28]}",
+        "merchantOrderId": merchant_order_id,
         "amount": amount,
-        "redirectUrl": redirect_url,
-        "redirectMode": "REDIRECT",
-        "callbackUrl": callback_url,
-        "paymentInstrument": {"type": "PAY_PAGE"},
+        "merchantUserId": f"UID{tenant_id[:28]}",
+        "expireAfter": 1200,
+        "paymentFlow": {
+            "type": "PG_CHECKOUT",
+            "merchantUrls": {
+                "redirectUrl": redirect_url,
+                "callbackUrl": callback_url,
+            },
+        },
     }
     if mobile_number:
         payload["mobileNumber"] = mobile_number
 
-    # Persist PENDING row before the external call
     txn = PhonePeTransaction(
         tenant_id=tenant_id,
         plan_id=plan,
         amount=amount,
-        merchant_transaction_id=merchant_transaction_id,
+        merchant_transaction_id=merchant_order_id,
         payment_status=PHONEPE_STATUS_PENDING,
     )
     db.add(txn)
     await db.flush()
 
-    base64_payload = base64.b64encode(json.dumps(payload).encode()).decode()
-    x_verify = _pay_checksum(base64_payload)
-
     log = logger.bind(
-        merchant_transaction_id=merchant_transaction_id,
+        merchant_order_id=merchant_order_id,
         tenant_id=tenant_id,
         plan=plan,
         amount_paise=amount,
     )
 
     try:
+        token = await _get_access_token()
         async with httpx.AsyncClient(timeout=30.0) as client:
             resp = await client.post(
                 f"{settings.phonepe_pg_base_url}{_PAY_PATH}",
-                json={"request": base64_payload},
+                json=payload,
                 headers={
                     "Content-Type": "application/json",
-                    "X-VERIFY": x_verify,
+                    "Authorization": f"O-Bearer {token}",
                     "Accept": "application/json",
                 },
             )
@@ -147,26 +156,26 @@ async def initiate_payment(
 
     txn.raw_response = json.dumps(resp_data)
 
-    if not resp_data.get("success"):
+    state = resp_data.get("state", "")
+    if state not in ("PENDING", "INITIATED"):
         txn.payment_status = PHONEPE_STATUS_FAILED
-        code = resp_data.get("code", "UNKNOWN")
-        message = resp_data.get("message", "unknown error")
+        code = resp_data.get("code", resp_data.get("errorCode", "UNKNOWN"))
+        message = resp_data.get("message", resp_data.get("description", "unknown error"))
         log.error("phonepe.initiate.api_error", code=code, message=message, response=resp_data)
         raise RuntimeError(f"PhonePe initiation failed [{code}]: {message}")
 
-    phonepe_url: str = (
-        resp_data.get("data", {})
-        .get("instrumentResponse", {})
-        .get("redirectInfo", {})
-        .get("url", "")
-    )
+    # New API returns redirectUrl at top level
+    phonepe_url: str = resp_data.get("redirectUrl", "")
     if not phonepe_url:
         txn.payment_status = PHONEPE_STATUS_FAILED
         log.error("phonepe.initiate.no_redirect_url", response=resp_data)
         raise RuntimeError("PhonePe response missing redirect URL")
 
+    # Store PhonePe's internal orderId if provided
+    txn.phonepe_transaction_id = resp_data.get("orderId")
+
     log.info("phonepe.initiate.success")
-    return merchant_transaction_id, phonepe_url
+    return merchant_order_id, phonepe_url
 
 
 # ── Payment status verification ───────────────────────────────────────────────
@@ -187,18 +196,14 @@ async def verify_payment_status(
     if txn is None:
         raise ValueError(f"Transaction not found: {merchant_transaction_id}")
 
-    x_verify = _status_checksum(merchant_transaction_id)
-    url = (
-        f"{settings.phonepe_pg_base_url}"
-        f"{_STATUS_PATH}/{settings.phonepe_client_id}/{merchant_transaction_id}"
-    )
+    token = await _get_access_token()
+    url = f"{settings.phonepe_pg_base_url}{_ORDER_PATH}/{merchant_transaction_id}/status"
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         resp = await client.get(
             url,
             headers={
-                "X-VERIFY": x_verify,
-                "X-MERCHANT-ID": settings.phonepe_client_id,
+                "Authorization": f"O-Bearer {token}",
                 "Accept": "application/json",
             },
         )
@@ -224,40 +229,32 @@ async def process_webhook(
 ) -> dict:
     """Validate X-VERIFY signature and process PhonePe server callback.
 
-    PhonePe sends: { "response": "<base64-encoded-payload>" }
+    PhonePe new API sends JSON body directly; signature is over the serialised body.
     Raises ValueError on bad signature (caller returns 400).
     """
-    base64_response: str = body.get("response", "")
-    if not base64_response:
-        raise ValueError("Missing 'response' field in PhonePe webhook body")
-
-    expected = _webhook_checksum(base64_response)
+    body_str = json.dumps(body, separators=(",", ":"), sort_keys=True)
+    expected = _webhook_checksum(body_str)
     if not hmac.compare_digest(x_verify_header.encode(), expected.encode()):
         raise ValueError("PhonePe webhook X-VERIFY signature mismatch")
 
-    payload: dict = json.loads(base64.b64decode(base64_response).decode())
-    data: dict = payload.get("data", {})
-    merchant_transaction_id: str = data.get("merchantTransactionId", "")
-
-    if not merchant_transaction_id:
-        raise ValueError("Webhook payload missing merchantTransactionId")
+    # New API webhook payload shape: {event, merchantOrderId, orderId, state, amount, ...}
+    merchant_order_id: str = body.get("merchantOrderId", "")
+    if not merchant_order_id:
+        raise ValueError("Webhook payload missing merchantOrderId")
 
     result = await db.execute(
         select(PhonePeTransaction).where(
-            PhonePeTransaction.merchant_transaction_id == merchant_transaction_id
+            PhonePeTransaction.merchant_transaction_id == merchant_order_id
         )
     )
     txn = result.scalar_one_or_none()
     if txn is None:
-        logger.warning(
-            "phonepe.webhook.unknown_txn",
-            merchant_transaction_id=merchant_transaction_id,
-        )
-        return payload
+        logger.warning("phonepe.webhook.unknown_txn", merchant_order_id=merchant_order_id)
+        return body
 
-    txn.raw_response = json.dumps(payload)
-    await _sync_transaction(db, txn, payload)
-    return payload
+    txn.raw_response = json.dumps(body)
+    await _sync_transaction(db, txn, body)
+    return body
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
@@ -267,26 +264,28 @@ async def _sync_transaction(
     txn: PhonePeTransaction,
     resp_data: dict,
 ) -> None:
-    code: str = resp_data.get("code", "")
-    data: dict = resp_data.get("data", {})
+    state: str = resp_data.get("state", "")
 
-    txn.phonepe_transaction_id = data.get("transactionId") or txn.phonepe_transaction_id
+    txn.phonepe_transaction_id = (
+        resp_data.get("orderId") or txn.phonepe_transaction_id
+    )
 
-    instrument = data.get("paymentInstrument", {})
-    if instrument:
-        txn.payment_method = instrument.get("type", txn.payment_method)
+    # Payment method from new API: paymentDetails[0].paymentMode
+    details = resp_data.get("paymentDetails", [])
+    if details and isinstance(details, list):
+        txn.payment_method = details[0].get("paymentMode", txn.payment_method)
 
-    if code == "PAYMENT_SUCCESS" or data.get("state") == "COMPLETED":
+    if state == "COMPLETED":
         txn.payment_status = PHONEPE_STATUS_SUCCESS
         await _upgrade_subscription(db, txn.tenant_id, txn.plan_id)
-    elif code in ("PAYMENT_ERROR", "PAYMENT_DECLINED", "TIMED_OUT", "BAD_REQUEST"):
+    elif state in ("FAILED", "CANCELLED", "EXPIRED", "ERROR"):
         txn.payment_status = PHONEPE_STATUS_FAILED
 
     await db.flush()
     logger.info(
         "phonepe.transaction_synced",
         merchant_transaction_id=txn.merchant_transaction_id,
-        code=code,
+        state=state,
         status=txn.payment_status,
     )
 

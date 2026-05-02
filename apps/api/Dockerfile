@@ -28,7 +28,6 @@ RUN pip install --no-cache-dir \
     "openpyxl>=3.1" \
     "celery[redis]>=5.3" \
     "redis>=5.0" \
-    "stripe>=7.0" \
     "alembic>=1.13" \
     "psycopg2-binary>=2.9" \
     "boto3>=1.34" \

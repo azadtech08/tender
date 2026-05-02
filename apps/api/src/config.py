@@ -46,36 +46,6 @@ class Settings(BaseSettings):
         env="CLERK_SECRET_KEY",
     )
 
-    # ── Stripe (Phase 2+) ─────────────────────────────────────────────────────
-    stripe_secret_key: Optional[str] = Field(
-        default=None,
-        env="STRIPE_SECRET_KEY",
-    )
-    stripe_webhook_secret: Optional[str] = Field(
-        default=None,
-        env="STRIPE_WEBHOOK_SECRET",
-    )
-    # Stripe Price IDs for each subscription plan.
-    stripe_price_starter: Optional[str] = Field(
-        default=None, env="STRIPE_PRICE_STARTER"
-    )
-    stripe_price_pro: Optional[str] = Field(
-        default=None, env="STRIPE_PRICE_PRO"
-    )
-    stripe_price_business: Optional[str] = Field(
-        default=None, env="STRIPE_PRICE_BUSINESS"
-    )
-    # Metered overage price IDs.
-    stripe_price_run_meter: Optional[str] = Field(
-        default=None, env="STRIPE_PRICE_RUN_METER"
-    )
-    stripe_price_tender_meter: Optional[str] = Field(
-        default=None, env="STRIPE_PRICE_TENDER_METER"
-    )
-    stripe_price_ai_meter: Optional[str] = Field(
-        default=None, env="STRIPE_PRICE_AI_METER"
-    )
-
     # ── PhonePe Business Payment Gateway (OAuth 2.0 / new API) ──────────────
     # Credentials from PhonePe Business → Developer Settings → API Keys
     phonepe_client_id: Optional[str] = Field(
