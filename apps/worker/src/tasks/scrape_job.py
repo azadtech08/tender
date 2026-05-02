@@ -141,12 +141,14 @@ def run_scrape_job(self, job_id: int) -> dict:
                 if keyword != keywords[-1]:
                     time.sleep(2)
 
+            # Publish "complete" event BEFORE committing "completed" status so the
+            # SSE stream delivers it to the client before the server-side loop closes.
+            _publish_event(session, job_id, "complete", {"total_tenders": total_tenders})
+
             # Mark completed
             job.status = "completed"
             job.completed_at = datetime.now(tz=timezone.utc)
             session.commit()
-
-            _publish_event(session, job_id, "complete", {"total_tenders": total_tenders})
             log.info("scrape_job.completed", total_tenders=total_tenders)
 
             # Fire outbound webhooks (best-effort, async)

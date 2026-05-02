@@ -10,7 +10,7 @@ type Tender = {
   id: number;
   job_id: number;
   keyword: string;
-  tender_reference_no: string | null;
+  tender_ref_no: string | null;
   tender_type: string | null;
   title: string | null;
   description: string | null;
@@ -27,7 +27,7 @@ type Tender = {
   it_relevant: string | null;
   quantity: string | null;
   link: string | null;
-  bid_submission_end_date: string | null;
+  bid_end_date: string | null;
   published_date: string | null;
   scraped_date: string | null;
 };
@@ -46,7 +46,7 @@ function fmtDate(s: string | null | undefined) {
 
 const COLS: { key: keyof Tender; label: string; sticky?: boolean; mono?: boolean }[] = [
   { key: "keyword",              label: "Keyword",    sticky: true, mono: true },
-  { key: "tender_reference_no",  label: "Reference",  sticky: true, mono: true },
+  { key: "tender_ref_no",        label: "Reference",  sticky: true, mono: true },
   { key: "tender_type",          label: "Type",       mono: true },
   { key: "title",                label: "Title" },
   { key: "organisation",         label: "Organisation" },
@@ -61,7 +61,7 @@ const COLS: { key: keyof Tender; label: string; sticky?: boolean; mono?: boolean
   { key: "email",                label: "Email",      mono: true },
   { key: "it_relevant",          label: "IT" },
   { key: "quantity",             label: "Quantity" },
-  { key: "bid_submission_end_date", label: "Deadline", mono: true },
+  { key: "bid_end_date",            label: "Deadline", mono: true },
   { key: "published_date",       label: "Published",  mono: true },
   { key: "scraped_date",         label: "Scraped",    mono: true },
 ];
@@ -104,19 +104,22 @@ export default function TendersPage() {
     mt = match,
   ) {
     setLoading(true);
-    const token = await getToken();
-    const params = new URLSearchParams({ per_page: String(PER_PAGE), page: String(p) });
-    if (q) {
-      params.set("search", q);
-      params.set("match", mt);
+    try {
+      const token = await getToken();
+      const params = new URLSearchParams({ per_page: String(PER_PAGE), page: String(p) });
+      if (q) {
+        params.set("search", q);
+        params.set("match", mt);
+      }
+      if (s) params.set("sort", s);
+      if (m.length) params.set("ministry", m.join(","));
+      const res = await fetch(`${API}/api/tenders?${params}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) setTenders(await res.json());
+    } finally {
+      setLoading(false);
     }
-    if (s) params.set("sort", s);
-    if (m.length) params.set("ministry", m.join(","));
-    const res = await fetch(`${API}/api/tenders?${params}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (res.ok) setTenders(await res.json());
-    setLoading(false);
   }
 
   // Export to Excel
@@ -252,7 +255,7 @@ export default function TendersPage() {
     const v = t[col.key];
     if (col.key === "tender_value" || col.key === "emd")
       return fmt(v as number | null, col.key === "tender_value" ? "₹" : "₹");
-    if (col.key === "bid_submission_end_date" || col.key === "published_date" || col.key === "scraped_date")
+    if (col.key === "bid_end_date" || col.key === "published_date" || col.key === "scraped_date")
       return fmtDate(v as string | null);
     return (v as string | null) ?? "—";
   }

@@ -50,9 +50,9 @@ class Job(Base, TimestampMixin):
         nullable=False,
         index=True,
     )
-    user_id: Mapped[int] = mapped_column(
+    user_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
         index=True,
     )
     keywords: Mapped[dict] = mapped_column(JSONB, nullable=False)
