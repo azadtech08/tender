@@ -2,7 +2,15 @@
 
 import { useAuth } from "@clerk/nextjs";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+
+const TENDER_SORT_OPTIONS = [
+  { value: "published_latest", label: "Bid Start Date: Latest First" },
+  { value: "published_oldest", label: "Bid Start Date: Oldest First" },
+  { value: "bid_end_latest",   label: "Bid End Date: Latest First" },
+  { value: "bid_end_oldest",   label: "Bid End Date: Oldest First" },
+];
 
 const API = "/api-backend";
 
@@ -20,12 +28,16 @@ type JobList = { items: Job[]; total: number; page: number; per_page: number };
 
 export default function DashboardPage() {
   const { getToken } = useAuth();
-  const [jobs, setJobs]         = useState<JobList | null>(null);
-  const [loading, setLoading]   = useState(true);
-  const [keywords, setKeywords] = useState("");
+  const router = useRouter();
+  const [jobs, setJobs]             = useState<JobList | null>(null);
+  const [loading, setLoading]       = useState(true);
+  const [keywords, setKeywords]     = useState("");
   const [perKeyword, setPerKeyword] = useState(10);
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating]     = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
+  const [tenderSort, setTenderSort]       = useState("published_latest");
+  const [tenderSortOpen, setTenderSortOpen] = useState(false);
+  const tenderSortRef = useRef<HTMLDivElement>(null);
 
   async function fetchJobs() {
     const token = await getToken();
@@ -40,6 +52,16 @@ export default function DashboardPage() {
   }
 
   useEffect(() => { fetchJobs(); }, []);
+
+  const handleSortClickOutside = useCallback((e: MouseEvent) => {
+    if (tenderSortRef.current && !tenderSortRef.current.contains(e.target as Node)) {
+      setTenderSortOpen(false);
+    }
+  }, []);
+  useEffect(() => {
+    document.addEventListener("mousedown", handleSortClickOutside);
+    return () => document.removeEventListener("mousedown", handleSortClickOutside);
+  }, [handleSortClickOutside]);
 
   async function createAndRun() {
     const kws = keywords.split(",").map((k) => k.trim()).filter(Boolean);
@@ -58,7 +80,8 @@ export default function DashboardPage() {
         headers: { Authorization: `Bearer ${token}` },
       });
       setKeywords("");
-      await fetchJobs();
+      // Navigate to the job detail page with the chosen sort pre-applied
+      router.push(`/dashboard/jobs/${job.id}?sort=${tenderSort}`);
     }
     setCreating(false);
   }
@@ -132,10 +155,68 @@ export default function DashboardPage() {
       </div>
 
       {/* ── New job ── */}
-      <div className="card-surface p-5">
-        <p className="text-xs font-mono mb-3" style={{ color: "var(--text-muted)" }}>
+      <div className="card-surface p-5 space-y-3">
+        <p className="text-xs font-mono" style={{ color: "var(--text-muted)" }}>
           NEW JOB — keywords (comma-separated) · tenders per keyword
         </p>
+
+        {/* Step 1 — Sort selection */}
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-mono whitespace-nowrap" style={{ color: "var(--accent)" }}>
+            Sort results by:
+          </span>
+          <div ref={tenderSortRef} className="relative">
+            <button
+              onClick={() => setTenderSortOpen((o) => !o)}
+              className="text-sm px-3 py-2 rounded-lg font-mono outline-none text-left flex items-center gap-2"
+              style={{
+                background: "var(--bg-elevated)",
+                border: "1px solid var(--border-bright)",
+                color: "var(--text-primary)",
+                minWidth: "240px",
+              }}
+            >
+              <span className="truncate flex-1">
+                {TENDER_SORT_OPTIONS.find((o) => o.value === tenderSort)?.label ?? "Sort"}
+              </span>
+              <span style={{ color: "var(--text-muted)", fontSize: "10px" }}>
+                {tenderSortOpen ? "▲" : "▼"}
+              </span>
+            </button>
+            {tenderSortOpen && (
+              <div
+                className="absolute top-full left-0 mt-1 z-50 rounded-lg overflow-hidden"
+                style={{
+                  background: "var(--bg-surface)",
+                  border: "1px solid var(--border-bright)",
+                  minWidth: "260px",
+                  boxShadow: "0 8px 24px rgba(0,0,0,0.4)",
+                }}
+              >
+                {TENDER_SORT_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.value}
+                    onClick={() => { setTenderSort(opt.value); setTenderSortOpen(false); }}
+                    className="w-full flex items-center justify-between px-3 py-2.5 text-left text-xs font-mono transition-colors hover:bg-white/[0.04]"
+                    style={{
+                      color: tenderSort === opt.value ? "var(--accent)" : "var(--text-primary)",
+                      borderBottom: "1px solid var(--border)",
+                      background: tenderSort === opt.value ? "rgba(245,158,11,0.08)" : "transparent",
+                      fontWeight: tenderSort === opt.value ? 600 : 400,
+                    }}
+                  >
+                    {opt.label}
+                    {tenderSort === opt.value && (
+                      <span style={{ color: "var(--accent)", fontSize: "11px" }}>✓</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Step 2 — Keyword + count + Run */}
         <div className="flex gap-3">
           <input
             type="text"
