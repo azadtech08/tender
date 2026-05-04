@@ -2,7 +2,7 @@
 
 import { useAuth } from "@clerk/nextjs";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
-import { useParams } from "next/navigation";
+import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 
 const API = "/api-backend";
@@ -58,8 +58,8 @@ type LogLine = {
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 const SORT_OPTIONS = [
-  { value: "bid_start_latest", label: "Bid Start Date: Latest First" },
-  { value: "bid_start_oldest", label: "Bid Start Date: Oldest First" },
+  { value: "published_latest", label: "Bid Start Date: Latest First" },
+  { value: "published_oldest", label: "Bid Start Date: Oldest First" },
   { value: "bid_end_latest",   label: "Bid End Date: Latest First" },
   { value: "bid_end_oldest",   label: "Bid End Date: Oldest First" },
 ];
@@ -143,6 +143,7 @@ function ProgressRing({ pct, status }: { pct: number; status: string }) {
 export default function JobDetailPage() {
   const { id: jobId } = useParams<{ id: string }>();
   const { getToken } = useAuth();
+  const searchParams = useSearchParams();
 
   const [job, setJob]       = useState<Job | null>(null);
   const [tenders, setTenders] = useState<TenderList | null>(null);
@@ -152,7 +153,9 @@ export default function JobDetailPage() {
   const [stateFilter, setStateFilter] = useState<string>("");
   const [selectedMinistries, setSelectedMinistries] = useState<string[]>([]);
   const [ministryOpen, setMinistryOpen] = useState(false);
-  const [sortOrder, setSortOrder] = useState<string>("bid_start_latest");
+  const [sortOrder, setSortOrder] = useState<string>(
+    searchParams.get("sort") ?? "published_latest"
+  );
   const [ministries, setMinistries] = useState<string[]>([]);
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
 
