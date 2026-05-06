@@ -138,7 +138,8 @@ class ActivateResponse(BaseModel):
     """Successful activation response."""
 
     token: str = Field(description="Signed PASETO v4.public license token")
-    expires_at: datetime
+    expires_at: datetime        # token TTL (≤30 days)
+    license_expires_at: datetime  # actual license/trial end date
     heartbeat_after_seconds: int
     plan: str
     features: dict[str, Any]

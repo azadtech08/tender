@@ -20,6 +20,7 @@ import hmac
 import json
 import time
 import uuid
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import httpx
@@ -291,6 +292,8 @@ async def _sync_transaction(
 
 
 async def _upgrade_subscription(db: AsyncSession, tenant_id: str, plan: str) -> None:
+    period_end = datetime.now(timezone.utc) + timedelta(days=30)
+
     result = await db.execute(
         select(Subscription).where(Subscription.tenant_id == tenant_id)
     )
@@ -299,7 +302,18 @@ async def _upgrade_subscription(db: AsyncSession, tenant_id: str, plan: str) -> 
         sub.plan = plan
         sub.status = "active"
         sub.cancel_at_period_end = False
+        sub.current_period_end = period_end
     else:
-        db.add(Subscription(tenant_id=tenant_id, plan=plan, status="active"))
+        db.add(Subscription(
+            tenant_id=tenant_id,
+            plan=plan,
+            status="active",
+            current_period_end=period_end,
+        ))
     await db.flush()
-    logger.info("phonepe.subscription_upgraded", tenant_id=tenant_id, plan=plan)
+    logger.info(
+        "phonepe.subscription_upgraded",
+        tenant_id=tenant_id,
+        plan=plan,
+        period_end=period_end.isoformat(),
+    )

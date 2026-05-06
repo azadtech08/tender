@@ -109,7 +109,7 @@ export default function LicensesListPage() {
         <Link
           href="/admin/licenses/new"
           className="text-sm px-5 py-2.5 rounded-lg font-semibold transition-opacity glow-amber"
-          style={{ background: "var(--accent)", color: "#0F1117" }}
+          style={{ background: "#F59E0B", color: "#0F1117" }}
         >
           ＋ Mint new license
         </Link>

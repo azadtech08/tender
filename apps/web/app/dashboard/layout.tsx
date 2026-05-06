@@ -11,18 +11,82 @@ const NAV_LINKS = [
   { href: "/dashboard/billing",  label: "Billing",  icon: "💳" },
 ];
 
+// Internal URL used for server-side API calls (bypasses the browser proxy).
+const INTERNAL_API =
+  process.env.INTERNAL_API_URL ??
+  process.env.NEXT_PUBLIC_API_URL ??
+  "http://localhost:8000";
+
+type AccessStatus = {
+  has_access: boolean;
+  reason: "subscribed" | "trial_active" | "trial_expired" | "no_access";
+  days_remaining: number | null;
+  expires_at: string | null;
+  plan: string | null;
+};
+
+async function getAccessStatus(token: string): Promise<AccessStatus | null> {
+  try {
+    const res = await fetch(`${INTERNAL_API}/api/billing/access-status`, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    // API unreachable — fail open so a backend hiccup never locks out users.
+    return null;
+  }
+}
+
 export default async function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const { userId } = auth();
+  // ── Step 1: Clerk auth ───────────────────────────────────────────────────
+  const { userId, getToken } = auth();
   if (!userId) redirect("/sign-in");
 
-  // Show an Admin link only to users with the tenzo_admin role.
+  // ── Step 2: Admin role check (must run BEFORE the license gate) ──────────
+  // Admins always have full dashboard access — no license or subscription
+  // check is applied to them.
   const user = await currentUser();
   const isAdmin =
     (user?.publicMetadata as { role?: string } | undefined)?.role === "tenzo_admin";
+
+  // ── Step 3: License / subscription gate (regular users only) ────────────
+  const token = await getToken();
+  let trialDaysRemaining: number | null = null;
+
+  if (!isAdmin && token) {
+    const access = await getAccessStatus(token);
+
+    if (access !== null && !access.has_access) {
+      if (access.reason === "trial_expired") {
+        redirect("/dashboard/billing?reason=trial_expired");
+      } else {
+        // no_access — user has never activated a license key
+        redirect("/activate?reason=no_license");
+      }
+    }
+
+    if (
+      access !== null &&
+      access.reason === "trial_active" &&
+      access.days_remaining !== null &&
+      access.days_remaining <= 3
+    ) {
+      trialDaysRemaining = access.days_remaining;
+    }
+  }
+
+  const trialLabel =
+    trialDaysRemaining === 0
+      ? "Trial expires today"
+      : trialDaysRemaining === 1
+      ? "Trial expires tomorrow"
+      : `Trial expires in ${trialDaysRemaining} days`;
 
   return (
     <div className="min-h-screen flex relative z-10">
@@ -78,7 +142,7 @@ export default async function DashboardLayout({
           className="mt-auto flex items-center gap-3 px-3 pt-4"
           style={{ borderTop: "1px solid var(--border)" }}
         >
-          <UserButton afterSignOutUrl="/" />
+          <UserButton />
           <span className="text-xs" style={{ color: "var(--text-muted)" }}>
             Account
           </span>
@@ -113,6 +177,31 @@ export default async function DashboardLayout({
             />
           </a>
         </header>
+
+        {/* Trial expiry banner — shown only when ≤ 3 days remain */}
+        {trialDaysRemaining !== null && (
+          <div
+            className="flex items-center justify-between px-8 py-2.5 text-sm shrink-0"
+            style={{
+              background: "rgba(245,158,11,0.10)",
+              borderBottom: "1px solid rgba(245,158,11,0.30)",
+            }}
+          >
+            <span style={{ color: "var(--accent)" }}>
+              ⚠ {trialLabel} — upgrade to keep access.
+            </span>
+            <Link
+              href="/dashboard/billing"
+              className="text-xs font-semibold font-mono px-3 py-1 rounded-md transition-opacity hover:opacity-80"
+              style={{
+                background: "var(--accent)",
+                color: "#0F1117",
+              }}
+            >
+              Upgrade now →
+            </Link>
+          </div>
+        )}
 
         <main className="flex-1 p-8 overflow-y-auto">{children}</main>
       </div>

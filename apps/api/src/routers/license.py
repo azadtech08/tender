@@ -13,14 +13,14 @@ from __future__ import annotations
 
 import json as _json
 import time as _time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from functools import wraps
 from typing import Annotated, Any, Callable, Optional
 
 import structlog
 from fastapi import APIRouter, Depends, Request, Response, status
 from fastapi.responses import JSONResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth_admin import get_client_ip
@@ -287,6 +287,27 @@ async def activate_license(
 
     # ── 5. Status / time checks ─────────────────────────────────────────────
     now = _now()
+
+    # ── 5a. First-activation trial clock ────────────────────────────────────
+    # If this is the very first activation of this key and no expiry was set
+    # by the admin, start the 7-day trial clock from right now.
+    prior_count = (
+        await db.execute(
+            select(func.count(LicenseActivation.id)).where(
+                LicenseActivation.license_id == lic.id,
+                LicenseActivation.event == EVENT_ACTIVATE,
+            )
+        )
+    ).scalar_one()
+    if prior_count == 0 and lic.expires_at is None:
+        lic.expires_at = now + timedelta(days=7)
+        logger.info(
+            "license.trial_clock_started",
+            license_id=lic.id,
+            tenant_id=lic.tenant_id,
+            trial_ends_at=lic.expires_at.isoformat(),
+        )
+
     deny_reason: Optional[tuple[str, str, int]] = None
     if lic.status == STATUS_REVOKED:
         deny_reason = (
@@ -300,13 +321,13 @@ async def activate_license(
             "This license is suspended. Contact support.",
             status.HTTP_403_FORBIDDEN,
         )
-    elif lic.expires_at <= now:
+    elif lic.expires_at is not None and lic.expires_at <= now:
         deny_reason = (
             REASON_KEY_EXPIRED,
             f"License expired at {lic.expires_at.isoformat()}.",
             status.HTTP_403_FORBIDDEN,
         )
-    elif lic.not_before > now:
+    elif lic.not_before is not None and lic.not_before > now:
         deny_reason = (
             "KEY_NOT_YET_VALID",
             f"License not valid until {lic.not_before.isoformat()}.",
@@ -357,8 +378,6 @@ async def activate_license(
 
     if device is None:
         # Slot check — count ACTIVE (non-revoked) devices.
-        from sqlalchemy import func
-
         active_count = (
             await db.execute(
                 select(func.count(LicenseDevice.id)).where(
@@ -445,6 +464,7 @@ async def activate_license(
         content=ActivateResponse(
             token=token,
             expires_at=token_exp,
+            license_expires_at=lic.expires_at,
             heartbeat_after_seconds=settings.license_heartbeat_interval_seconds,
             plan=lic.plan,
             features=dict(lic.features or {}),

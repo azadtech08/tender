@@ -179,7 +179,7 @@ export default function NewLicensePage() {
                 onClick={copyKey}
                 className="text-sm px-4 py-3 rounded-lg font-mono font-semibold transition-opacity"
                 style={{
-                  background: copied ? "#34D399" : "var(--accent)",
+                  background: copied ? "#34D399" : "#F59E0B",
                   color: "#0F1117",
                   minWidth: "120px",
                 }}
@@ -211,7 +211,7 @@ export default function NewLicensePage() {
               onClick={() => router.push(`/admin/licenses/${result.license.id}`)}
               className="flex-1 text-sm px-4 py-2.5 rounded-lg font-mono transition-opacity"
               style={{
-                background: "var(--accent)",
+                background: "#F59E0B",
                 color: "#0F1117",
                 fontWeight: "600",
               }}
@@ -388,7 +388,7 @@ export default function NewLicensePage() {
             onClick={mint}
             disabled={minting}
             className="flex-1 text-sm px-5 py-3 rounded-lg font-semibold transition-opacity disabled:opacity-50 glow-amber"
-            style={{ background: "var(--accent)", color: "#0F1117" }}
+            style={{ background: "#F59E0B", color: "#0F1117" }}
           >
             {minting ? "Minting…" : "▶ Mint license"}
           </button>
