@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import TokenData, get_current_user
 from config import settings
-from database import get_db_rls
+from database import get_db, get_db_rls
 from services.phonepe_service import (
     initiate_payment,
     process_webhook,
@@ -135,7 +135,7 @@ async def check_payment_status(
 @webhook_router.post("/phonepe", status_code=200)
 async def phonepe_webhook(
     request: Request,
-    db: AsyncSession = Depends(get_db_rls),
+    db: AsyncSession = Depends(get_db),   # no auth on webhooks — bypass RLS entirely
     x_verify: str = Header(alias="X-VERIFY", default=""),
 ):
     """Receive PhonePe server-to-server payment callback.

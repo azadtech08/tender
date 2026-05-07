@@ -71,6 +71,7 @@ from db_models import (
     STATUS_ACTIVE,
     License,
     LicenseUsageCounter,
+    Subscription,
 )
 from services.license_cache import is_revoked
 from services.license_features import merge_features
@@ -157,6 +158,15 @@ class LicenseGuard:
             tenant_id=payload.tenant_id,
             plan=payload.plan,
             features=merge_features(payload.plan, payload.features),
+        )
+
+    @classmethod
+    def from_subscription(cls, sub: "Subscription") -> "LicenseGuard":
+        return cls(
+            license_id=None,
+            tenant_id=sub.tenant_id,
+            plan=sub.plan,
+            features=merge_features(sub.plan, {}),
         )
 
     # ── instance helpers ─────────────────────────────────────────────────────
@@ -342,7 +352,8 @@ async def require_valid_license(
     user: Annotated[TokenData, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> LicenseGuard:
-    """Look up an active License row for the caller's tenant_id.
+    """Grant access if the caller has either an active Subscription (PhonePe
+    payment) or a valid License key (trial).  Checked in that order.
 
     Mode handling:
       * ``off``      → unrestricted guard, no DB read
@@ -356,6 +367,28 @@ async def require_valid_license(
         return LicenseGuard.unrestricted(user.tenant_id)
 
     now = datetime.now(tz=timezone.utc)
+
+    # ── Path 1: active subscription (PhonePe payment) ────────────────────────
+    sub_result = await db.execute(
+        select(Subscription).where(Subscription.tenant_id == user.tenant_id)
+    )
+    sub = sub_result.scalar_one_or_none()
+    if (
+        sub is not None
+        and sub.status == "active"
+        and sub.current_period_end is not None
+        and sub.current_period_end > now
+    ):
+        _bump_check(mode, "allow_subscription")
+        logger.debug(
+            "license.allow_via_subscription",
+            tenant_id=user.tenant_id,
+            plan=sub.plan,
+            period_end=sub.current_period_end.isoformat(),
+        )
+        return LicenseGuard.from_subscription(sub)
+
+    # ── Path 2: active license key (trial) ───────────────────────────────────
     result = await db.execute(
         select(License)
         .where(
@@ -390,7 +423,7 @@ async def require_valid_license(
             return LicenseGuard.unrestricted(user.tenant_id)
         raise _expired_license_response(lic.expires_at)
 
-    if lic.not_before > now:
+    if lic.not_before is not None and lic.not_before > now:
         _bump_check(mode, "deny_not_yet_valid")
         if mode == "warn":
             logger.warning(

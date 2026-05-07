@@ -26,24 +26,38 @@ type UsageData = {
   ai_summaries: number;
 };
 
+// State of the post-payment verification flow:
+//  "verifying" — first check in progress (just landed from PhonePe)
+//  "delayed"   — still polling, webhook not yet processed
+//  "confirmed" — access verified, redirecting in 2 s
+type VerifyState = "verifying" | "delayed" | "confirmed" | null;
+
 export default function BillingPage() {
   const { getToken } = useAuth();
   const searchParams = useSearchParams();
-  const [planData, setPlanData] = useState<PlanData | null>(null);
-  const [usageData, setUsageData] = useState<UsageData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [upgradingPlan, setUpgradingPlan] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [paymentStatus, setPaymentStatus] = useState<"success" | "cancelled" | "pending" | null>(null);
 
-  // Read ?payment= query param set by PhonePe redirect
+  const [planData, setPlanData]         = useState<PlanData | null>(null);
+  const [usageData, setUsageData]       = useState<UsageData | null>(null);
+  const [loading, setLoading]           = useState(true);
+  const [upgradingPlan, setUpgradingPlan] = useState<string | null>(null);
+  const [error, setError]               = useState<string | null>(null);
+
+  const [paymentStatus, setPaymentStatus] = useState<"success" | "cancelled" | "pending" | null>(null);
+  const [redirectReason, setRedirectReason] = useState<"trial_expired" | null>(null);
+  const [verifyState, setVerifyState]   = useState<VerifyState>(null);
+
+  // ── Read query params ────────────────────────────────────────────────────
   useEffect(() => {
     const p = searchParams.get("payment");
-    if (p === "success") setPaymentStatus("success");
+    if (p === "success")   setPaymentStatus("success");
     else if (p === "cancelled") setPaymentStatus("cancelled");
-    else if (p === "pending") setPaymentStatus("pending");
+    else if (p === "pending")   setPaymentStatus("pending");
+
+    const r = searchParams.get("reason");
+    if (r === "trial_expired") setRedirectReason("trial_expired");
   }, [searchParams]);
 
+  // ── Load plan + usage ────────────────────────────────────────────────────
   useEffect(() => {
     async function load() {
       const token = await getToken();
@@ -59,6 +73,89 @@ export default function BillingPage() {
     load();
   }, []);
 
+  // ── Post-payment verification + polling ──────────────────────────────────
+  // Runs when user returns from PhonePe with ?payment=success.
+  //
+  // Step 1: Proactively call /api/billing/phonepe/status with the stored
+  //   merchant_transaction_id. This hits PhonePe directly and runs
+  //   _upgrade_subscription on COMPLETED state — handles the case where the
+  //   server-to-server webhook was delayed or not delivered (e.g. ngrok down).
+  //
+  // Step 2: Poll /api/billing/access-status every 3 s for up to 60 s.
+  //
+  // Step 3: On confirmed access, use window.location.href (full reload) so
+  //   the dashboard layout server component re-runs and picks up the new
+  //   subscription — router.push stays client-side and the layout stays stale.
+  useEffect(() => {
+    if (paymentStatus !== "success") return;
+
+    let cancelled = false;
+    let attempts  = 0;
+    const MAX_ATTEMPTS = 20; // 60 s total
+
+    async function activateIfPending() {
+      const pendingStr = localStorage.getItem("phonepe_pending_txn");
+      if (!pendingStr) return;
+      try {
+        const { merchant_transaction_id } = JSON.parse(pendingStr);
+        const token = await getToken();
+        // Side effect: if PhonePe reports COMPLETED, the backend upgrades the
+        // subscription immediately — no webhook needed.
+        await fetch(
+          `${API}/api/billing/phonepe/status?merchant_transaction_id=${encodeURIComponent(merchant_transaction_id)}`,
+          { headers: { Authorization: `Bearer ${token}` } },
+        );
+      } catch {
+        // Non-critical — polling below will confirm the result regardless.
+      } finally {
+        localStorage.removeItem("phonepe_pending_txn");
+      }
+    }
+
+    async function poll() {
+      if (cancelled) return;
+
+      setVerifyState(attempts === 0 ? "verifying" : "delayed");
+
+      try {
+        const token = await getToken();
+        const res = await fetch(`${API}/api/billing/access-status`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.has_access) {
+            if (!cancelled) {
+              setVerifyState("confirmed");
+              // Full reload so the dashboard layout server component re-runs
+              // and computes hasAccess: true — router.push leaves it stale.
+              setTimeout(() => { if (!cancelled) { window.location.href = "/dashboard"; } }, 2000);
+            }
+            return;
+          }
+        }
+      } catch {
+        // Network error — will retry
+      }
+
+      attempts++;
+      if (attempts < MAX_ATTEMPTS && !cancelled) {
+        setTimeout(poll, 3000);
+      } else if (!cancelled) {
+        setVerifyState(null);
+        setError(
+          "Payment received but access verification timed out. " +
+          "Please refresh this page. If the issue persists, contact support.",
+        );
+      }
+    }
+
+    // Proactive status check first, then start polling.
+    activateIfPending().then(() => { if (!cancelled) poll(); });
+    return () => { cancelled = true; };
+  }, [paymentStatus]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Payment initiation ───────────────────────────────────────────────────
   async function handleUpgrade(plan: string) {
     setError(null);
     setUpgradingPlan(plan);
@@ -73,7 +170,7 @@ export default function BillingPage() {
         body: JSON.stringify({
           plan,
           success_path: "/dashboard/billing?payment=success",
-          cancel_path: "/dashboard/billing?payment=cancelled",
+          cancel_path:  "/dashboard/billing?payment=cancelled",
         }),
       });
 
@@ -82,8 +179,13 @@ export default function BillingPage() {
         throw new Error(body.detail ?? `Error ${res.status}`);
       }
 
-      const { redirect_url } = await res.json();
-      // Redirect user to PhonePe hosted payment page
+      const { redirect_url, merchant_transaction_id } = await res.json();
+      // Store so the return handler can proactively verify via PhonePe status API,
+      // bypassing the webhook if it hasn't fired yet.
+      localStorage.setItem(
+        "phonepe_pending_txn",
+        JSON.stringify({ merchant_transaction_id, plan }),
+      );
       window.location.href = redirect_url;
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Payment initiation failed");
@@ -106,34 +208,66 @@ export default function BillingPage() {
         )}
       </p>
 
-      {/* Payment return banners */}
-      {paymentStatus === "success" && (
-        <div className="mb-6 rounded-lg bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-800">
-          ✓ Payment successful! Your plan will be updated within a few seconds.
+      {/* ── Trial-expired redirect banner ─────────────────────────────────── */}
+      {redirectReason === "trial_expired" && !verifyState && (
+        <div className="mb-6 rounded-lg bg-amber-50 border border-amber-300 px-4 py-3 text-sm text-amber-900">
+          <span className="font-semibold">Your free trial has expired.</span>{" "}
+          Choose a plan below to restore your dashboard access.
         </div>
       )}
-      {paymentStatus === "cancelled" && (
+
+      {/* ── Payment return banners ────────────────────────────────────────── */}
+
+      {/* Verifying: first check in progress */}
+      {verifyState === "verifying" && (
+        <div className="mb-6 rounded-lg bg-blue-50 border border-blue-200 px-4 py-3 text-sm text-blue-800 flex items-center gap-2">
+          <span className="inline-block w-3.5 h-3.5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin shrink-0" />
+          Verifying your payment…
+        </div>
+      )}
+
+      {/* Delayed: webhook not yet processed, still polling */}
+      {verifyState === "delayed" && (
+        <div className="mb-6 rounded-lg bg-blue-50 border border-blue-200 px-4 py-3 text-sm text-blue-800 flex items-center gap-2">
+          <span className="inline-block w-3.5 h-3.5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin shrink-0" />
+          Payment received, verifying access… this usually takes a few seconds.
+        </div>
+      )}
+
+      {/* Confirmed: access active, about to redirect */}
+      {verifyState === "confirmed" && (
+        <div className="mb-6 rounded-lg bg-green-50 border border-green-200 px-4 py-3 text-sm text-green-800">
+          ✓ Payment confirmed and access granted! Redirecting to dashboard…
+        </div>
+      )}
+
+      {/* Cancelled */}
+      {paymentStatus === "cancelled" && !verifyState && (
         <div className="mb-6 rounded-lg bg-yellow-50 border border-yellow-200 px-4 py-3 text-sm text-yellow-800">
           Payment was cancelled. You can try again anytime.
         </div>
       )}
-      {paymentStatus === "pending" && (
+
+      {/* Pending (arrived without success/cancel, e.g. UPI delay) */}
+      {paymentStatus === "pending" && !verifyState && (
         <div className="mb-6 rounded-lg bg-blue-50 border border-blue-200 px-4 py-3 text-sm text-blue-800">
           Payment is being processed. Refresh this page in a moment.
         </div>
       )}
+
+      {/* Error */}
       {error && (
         <div className="mb-6 rounded-lg bg-red-50 border border-red-200 px-4 py-3 text-sm text-red-800">
           {error}
         </div>
       )}
 
-      {/* Usage summary */}
+      {/* ── Usage summary ─────────────────────────────────────────────────── */}
       {usageData && (
         <div className="grid grid-cols-3 gap-4 mb-8">
           {[
-            { label: "Runs (all time)",        value: usageData.runs },
-            { label: "Tenders (all time)",     value: usageData.tenders },
+            { label: "Runs (all time)",         value: usageData.runs },
+            { label: "Tenders (all time)",      value: usageData.tenders },
             { label: "AI summaries (all time)", value: usageData.ai_summaries },
           ].map((u) => (
             <div key={u.label} className="bg-white rounded-xl border border-slate-200 p-4 text-center">
@@ -144,10 +278,10 @@ export default function BillingPage() {
         </div>
       )}
 
-      {/* Plan cards */}
+      {/* ── Plan cards ────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
         {PLANS.map((p) => {
-          const isCurrent = planData?.plan === p.id;
+          const isCurrent  = planData?.plan === p.id;
           const isUpgrading = upgradingPlan === p.id;
           return (
             <div
@@ -172,7 +306,7 @@ export default function BillingPage() {
               ) : p.id !== "free" ? (
                 <button
                   onClick={() => handleUpgrade(p.id)}
-                  disabled={!!upgradingPlan}
+                  disabled={!!upgradingPlan || !!verifyState}
                   className="text-sm bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed text-white rounded-lg py-2 flex items-center justify-center gap-2"
                 >
                   {isUpgrading ? (

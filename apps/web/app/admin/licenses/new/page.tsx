@@ -20,10 +20,20 @@ type MintResponse = {
   raw_key: string;
 };
 
-function isoAtStartOfDay(dateStr: string): string {
-  // dateStr is YYYY-MM-DD — convert to UTC ISO
-  return new Date(dateStr + "T00:00:00.000Z").toISOString();
-}
+// Duration presets: label → hours
+const DURATION_PRESETS: { label: string; hours: number }[] = [
+  { label: "2 hours",   hours: 2 },
+  { label: "6 hours",   hours: 6 },
+  { label: "12 hours",  hours: 12 },
+  { label: "24 hours",  hours: 24 },
+  { label: "48 hours",  hours: 48 },
+  { label: "7 days",    hours: 168 },
+  { label: "14 days",   hours: 336 },
+  { label: "30 days",   hours: 720 },
+  { label: "90 days",   hours: 2160 },
+  { label: "1 year",    hours: 8760 },
+  { label: "Custom…",   hours: 0 },
+];
 
 const DEFAULT_FEATURES: Record<string, Record<string, unknown>> = {
   free: { max_runs_per_month: 3 },
@@ -37,15 +47,22 @@ export default function NewLicensePage() {
   const { getToken } = useAuth();
   const router = useRouter();
 
-  const defaultExpires = (() => {
+  // Default datetime-local value = 1 year from now (YYYY-MM-DDTHH:MM)
+  const defaultDatetime = (() => {
     const d = new Date();
     d.setFullYear(d.getFullYear() + 1);
-    return d.toISOString().slice(0, 10);
+    return d.toISOString().slice(0, 16);
   })();
 
   const [tenantId, setTenantId] = useState("");
   const [plan, setPlan] = useState("pro");
-  const [expiresAt, setExpiresAt] = useState(defaultExpires);
+
+  // Expiry mode: "duration" (relative, sent as duration_hours) or "datetime" (absolute)
+  const [expiryMode, setExpiryMode]           = useState<"duration" | "datetime">("duration");
+  const [durationPreset, setDurationPreset]   = useState(168);   // hours; 168 = 7 days
+  const [customHours, setCustomHours]         = useState<number | "">(24);
+  const [expiresDatetime, setExpiresDatetime] = useState(defaultDatetime);
+
   const [maxDevices, setMaxDevices] = useState(3);
   const [notes, setNotes] = useState("");
   const [featuresJson, setFeaturesJson] = useState(
@@ -74,6 +91,19 @@ export default function NewLicensePage() {
       catch { setError("Features JSON is not valid."); return; }
     }
 
+    // Build the expiry payload — exactly one of expires_at or duration_hours.
+    let expiryPayload: { expires_at: string } | { duration_hours: number };
+    if (expiryMode === "duration") {
+      const hours = durationPreset === 0 ? Number(customHours) : durationPreset;
+      if (!hours || hours <= 0) { setError("Duration must be greater than 0."); return; }
+      expiryPayload = { duration_hours: hours };
+    } else {
+      if (!expiresDatetime) { setError("Expiry date & time is required."); return; }
+      const isoUtc = new Date(expiresDatetime).toISOString();
+      if (new Date(isoUtc) <= new Date()) { setError("Expiry must be in the future."); return; }
+      expiryPayload = { expires_at: isoUtc };
+    }
+
     setMinting(true);
     try {
       const token = await getToken();
@@ -86,7 +116,7 @@ export default function NewLicensePage() {
         body: JSON.stringify({
           tenant_id: tenantId.trim(),
           plan,
-          expires_at: isoAtStartOfDay(expiresAt),
+          ...expiryPayload,
           max_devices: maxDevices,
           features,
           notes: notes.trim() || null,
@@ -179,7 +209,7 @@ export default function NewLicensePage() {
                 onClick={copyKey}
                 className="text-sm px-4 py-3 rounded-lg font-mono font-semibold transition-opacity"
                 style={{
-                  background: copied ? "#34D399" : "var(--accent)",
+                  background: copied ? "#34D399" : "#F59E0B",
                   color: "#0F1117",
                   minWidth: "120px",
                 }}
@@ -211,7 +241,7 @@ export default function NewLicensePage() {
               onClick={() => router.push(`/admin/licenses/${result.license.id}`)}
               className="flex-1 text-sm px-4 py-2.5 rounded-lg font-mono transition-opacity"
               style={{
-                background: "var(--accent)",
+                background: "#F59E0B",
                 color: "#0F1117",
                 fontWeight: "600",
               }}
@@ -327,21 +357,97 @@ export default function NewLicensePage() {
           </div>
         </div>
 
-        <div>
-          <label className="text-xs font-mono block mb-1.5" style={{ color: "var(--text-muted)" }}>
-            Expires at
-          </label>
-          <input
-            type="date"
-            value={expiresAt}
-            onChange={(e) => setExpiresAt(e.target.value)}
-            className="w-full text-sm px-4 py-2.5 rounded-lg font-mono outline-none"
-            style={{
-              background: "var(--bg-elevated)",
-              border: "1px solid var(--border-bright)",
-              color: "var(--text-primary)",
-            }}
-          />
+        {/* ── Expiry ─────────────────────────────────────────────────────── */}
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <label className="text-xs font-mono" style={{ color: "var(--text-muted)" }}>
+              Expiry
+            </label>
+            {/* Mode toggle */}
+            <div
+              className="flex rounded-md overflow-hidden text-[11px] font-mono ml-auto"
+              style={{ border: "1px solid var(--border-bright)" }}
+            >
+              {(["duration", "datetime"] as const).map((m) => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => setExpiryMode(m)}
+                  className="px-3 py-1 transition-colors"
+                  style={{
+                    background: expiryMode === m ? "#F59E0B" : "var(--bg-elevated)",
+                    color:      expiryMode === m ? "#0F1117"  : "var(--text-muted)",
+                  }}
+                >
+                  {m === "duration" ? "Duration" : "Date + Time"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {expiryMode === "duration" ? (
+            <div className="space-y-2">
+              <select
+                value={durationPreset}
+                onChange={(e) => setDurationPreset(Number(e.target.value))}
+                className="w-full text-sm px-4 py-2.5 rounded-lg font-mono outline-none"
+                style={{
+                  background: "var(--bg-elevated)",
+                  border: "1px solid var(--border-bright)",
+                  color: "var(--text-primary)",
+                }}
+              >
+                {DURATION_PRESETS.map((p) => (
+                  <option key={p.hours} value={p.hours}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+              {durationPreset === 0 && (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={1}
+                    max={8760}
+                    value={customHours}
+                    onChange={(e) =>
+                      setCustomHours(e.target.value === "" ? "" : Number(e.target.value))
+                    }
+                    placeholder="e.g. 36"
+                    className="w-full text-sm px-4 py-2.5 rounded-lg font-mono outline-none"
+                    style={{
+                      background: "var(--bg-elevated)",
+                      border: "1px solid var(--border-bright)",
+                      color: "var(--text-primary)",
+                    }}
+                  />
+                  <span className="text-xs font-mono shrink-0" style={{ color: "var(--text-muted)" }}>
+                    hours
+                  </span>
+                </div>
+              )}
+              <p className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>
+                Expiry is computed server-side from UTC now + the chosen duration.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-1">
+              <input
+                type="datetime-local"
+                value={expiresDatetime}
+                onChange={(e) => setExpiresDatetime(e.target.value)}
+                className="w-full text-sm px-4 py-2.5 rounded-lg font-mono outline-none"
+                style={{
+                  background: "var(--bg-elevated)",
+                  border: "1px solid var(--border-bright)",
+                  color: "var(--text-primary)",
+                }}
+              />
+              <p className="text-[10px] font-mono" style={{ color: "var(--text-muted)" }}>
+                Your local time — converted to UTC before storing.
+              </p>
+            </div>
+          )}
         </div>
 
         <div>
@@ -388,7 +494,7 @@ export default function NewLicensePage() {
             onClick={mint}
             disabled={minting}
             className="flex-1 text-sm px-5 py-3 rounded-lg font-semibold transition-opacity disabled:opacity-50 glow-amber"
-            style={{ background: "var(--accent)", color: "#0F1117" }}
+            style={{ background: "#F59E0B", color: "#0F1117" }}
           >
             {minting ? "Minting…" : "▶ Mint license"}
           </button>

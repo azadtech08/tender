@@ -54,6 +54,20 @@ type ActivationRow = {
   created_at: string;
 };
 
+const DURATION_PRESETS: { label: string; hours: number }[] = [
+  { label: "2 hours",  hours: 2 },
+  { label: "6 hours",  hours: 6 },
+  { label: "12 hours", hours: 12 },
+  { label: "24 hours", hours: 24 },
+  { label: "48 hours", hours: 48 },
+  { label: "7 days",   hours: 168 },
+  { label: "14 days",  hours: 336 },
+  { label: "30 days",  hours: 720 },
+  { label: "90 days",  hours: 2160 },
+  { label: "1 year",   hours: 8760 },
+  { label: "Custom…",  hours: 0 },
+];
+
 const STATUS_COLORS: Record<License["status"], string> = {
   active:    "#34D399",
   suspended: "#FBBF24",
@@ -86,6 +100,14 @@ export default function LicenseDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  // Extend-expiry inline panel state
+  const [showExtend, setShowExtend]             = useState(false);
+  const [extendMode, setExtendMode]             = useState<"duration" | "datetime">("duration");
+  const [extendPreset, setExtendPreset]         = useState(168);
+  const [extendCustomHours, setExtendCustomHours] = useState<number | "">(24);
+  const [extendDatetime, setExtendDatetime]     = useState("");
+  const [extendReason, setExtendReason]         = useState("");
 
   async function authHeaders() {
     const token = await getToken();
@@ -163,18 +185,21 @@ export default function LicenseDetailPage() {
     await callAction("reactivate", {});
   }
 
-  async function extend() {
-    const currentISO = detail?.license.expires_at ?? new Date().toISOString();
-    const defaultDate = new Date(currentISO);
-    defaultDate.setFullYear(defaultDate.getFullYear() + 1);
-    const input = window.prompt(
-      "New expires_at (YYYY-MM-DD):",
-      defaultDate.toISOString().slice(0, 10),
-    );
-    if (!input) return;
-    const newIso = new Date(input + "T00:00:00.000Z").toISOString();
-    const reason = window.prompt("Reason (optional):", "") ?? "";
-    await callAction("extend", { new_expires_at: newIso, reason: reason || null });
+  async function submitExtend() {
+    let expiryPayload: { new_expires_at: string } | { duration_hours: number };
+    if (extendMode === "duration") {
+      const hours = extendPreset === 0 ? Number(extendCustomHours) : extendPreset;
+      if (!hours || hours <= 0) { alert("Duration must be greater than 0."); return; }
+      expiryPayload = { duration_hours: hours };
+    } else {
+      if (!extendDatetime) { alert("Expiry date & time is required."); return; }
+      const isoUtc = new Date(extendDatetime).toISOString();
+      if (new Date(isoUtc) <= new Date()) { alert("Expiry must be in the future."); return; }
+      expiryPayload = { new_expires_at: isoUtc };
+    }
+    await callAction("extend", { ...expiryPayload, reason: extendReason.trim() || null });
+    setShowExtend(false);
+    setExtendReason("");
   }
 
   async function revokeDevice(deviceId: number, fp: string) {
@@ -254,13 +279,21 @@ export default function LicenseDetailPage() {
         {lic.status === "active" && (
           <>
             <button
-              onClick={extend}
+              onClick={() => {
+                // Pre-fill datetime with current expiry + 1 year as a sensible default
+                const base = detail?.license.expires_at
+                  ? new Date(detail.license.expires_at)
+                  : new Date();
+                base.setFullYear(base.getFullYear() + 1);
+                setExtendDatetime(base.toISOString().slice(0, 16));
+                setShowExtend((v) => !v);
+              }}
               disabled={busy}
               className="text-sm px-4 py-2 rounded-lg font-mono transition-opacity disabled:opacity-50"
               style={{
-                background: "var(--bg-elevated)",
-                border: "1px solid var(--border-bright)",
-                color: "var(--text-primary)",
+                background: showExtend ? "rgba(245,158,11,0.15)" : "var(--bg-elevated)",
+                border: `1px solid ${showExtend ? "#F59E0B" : "var(--border-bright)"}`,
+                color: showExtend ? "#F59E0B" : "var(--text-primary)",
               }}
             >
               📅 Extend expiry
@@ -325,6 +358,145 @@ export default function LicenseDetailPage() {
           </p>
         )}
       </div>
+
+      {/* ── Extend-expiry inline panel ── */}
+      {showExtend && lic.status === "active" && (
+        <div
+          className="card-surface p-5 space-y-4"
+          style={{ border: "1px solid rgba(245,158,11,0.35)", background: "rgba(245,158,11,0.04)" }}
+        >
+          <p className="text-xs font-semibold font-mono" style={{ color: "#F59E0B" }}>
+            📅 Extend expiry
+          </p>
+
+          {/* Mode toggle */}
+          <div className="flex gap-1 rounded-lg p-0.5 w-fit" style={{ background: "var(--bg-elevated)", border: "1px solid var(--border)" }}>
+            {(["duration", "datetime"] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => setExtendMode(m)}
+                className="text-xs px-4 py-1.5 rounded-md font-mono transition-all"
+                style={{
+                  background: extendMode === m ? "#F59E0B" : "transparent",
+                  color: extendMode === m ? "#000" : "var(--text-muted)",
+                  fontWeight: extendMode === m ? 600 : 400,
+                }}
+              >
+                {m === "duration" ? "Duration" : "Date + Time"}
+              </button>
+            ))}
+          </div>
+
+          {extendMode === "duration" ? (
+            <div className="flex flex-wrap items-center gap-3">
+              <select
+                value={extendPreset}
+                onChange={(e) => setExtendPreset(Number(e.target.value))}
+                className="text-sm font-mono rounded-lg px-3 py-2"
+                style={{
+                  background: "var(--bg-elevated)",
+                  border: "1px solid var(--border-bright)",
+                  color: "var(--text-primary)",
+                  outline: "none",
+                }}
+              >
+                {DURATION_PRESETS.map((p) => (
+                  <option key={p.hours} value={p.hours}>{p.label}</option>
+                ))}
+              </select>
+              {extendPreset === 0 && (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="number"
+                    min={1}
+                    max={8760}
+                    value={extendCustomHours}
+                    onChange={(e) => setExtendCustomHours(e.target.value === "" ? "" : Number(e.target.value))}
+                    placeholder="Hours"
+                    className="text-sm font-mono rounded-lg px-3 py-2 w-28"
+                    style={{
+                      background: "var(--bg-elevated)",
+                      border: "1px solid var(--border-bright)",
+                      color: "var(--text-primary)",
+                      outline: "none",
+                    }}
+                  />
+                  <span className="text-xs font-mono" style={{ color: "var(--text-muted)" }}>hours</span>
+                </div>
+              )}
+              {extendPreset !== 0 && (
+                <span className="text-xs font-mono" style={{ color: "var(--text-muted)" }}>
+                  from server now →{" "}
+                  {fmt(new Date(Date.now() + extendPreset * 3600_000).toISOString())}
+                </span>
+              )}
+            </div>
+          ) : (
+            <div>
+              <input
+                type="datetime-local"
+                value={extendDatetime}
+                onChange={(e) => setExtendDatetime(e.target.value)}
+                className="text-sm font-mono rounded-lg px-3 py-2"
+                style={{
+                  background: "var(--bg-elevated)",
+                  border: "1px solid var(--border-bright)",
+                  color: "var(--text-primary)",
+                  outline: "none",
+                }}
+              />
+              <p className="text-[11px] mt-1 font-mono" style={{ color: "var(--text-muted)" }}>
+                Your local time — converted to UTC before saving.
+              </p>
+            </div>
+          )}
+
+          {/* Reason */}
+          <div>
+            <label className="text-xs font-mono mb-1 block" style={{ color: "var(--text-muted)" }}>
+              Reason (optional, logged in audit trail)
+            </label>
+            <input
+              type="text"
+              value={extendReason}
+              onChange={(e) => setExtendReason(e.target.value)}
+              placeholder="e.g. Renewal, trial extension, promo…"
+              maxLength={200}
+              className="w-full text-sm font-mono rounded-lg px-3 py-2"
+              style={{
+                background: "var(--bg-elevated)",
+                border: "1px solid var(--border-bright)",
+                color: "var(--text-primary)",
+                outline: "none",
+              }}
+            />
+          </div>
+
+          {/* Actions */}
+          <div className="flex gap-3">
+            <button
+              onClick={submitExtend}
+              disabled={busy}
+              className="text-sm px-5 py-2 rounded-lg font-mono font-semibold transition-opacity disabled:opacity-50"
+              style={{ background: "#F59E0B", color: "#000" }}
+            >
+              {busy ? "Saving…" : "Save extension"}
+            </button>
+            <button
+              onClick={() => { setShowExtend(false); setExtendReason(""); }}
+              disabled={busy}
+              className="text-sm px-4 py-2 rounded-lg font-mono transition-opacity disabled:opacity-50"
+              style={{
+                background: "var(--bg-elevated)",
+                border: "1px solid var(--border-bright)",
+                color: "var(--text-muted)",
+              }}
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── Counts ── */}
       <div className="grid grid-cols-3 gap-4">

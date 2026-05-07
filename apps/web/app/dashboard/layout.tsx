@@ -1,89 +1,93 @@
-import { UserButton } from "@clerk/nextjs";
 import { auth, currentUser } from "@clerk/nextjs/server";
+import { headers } from "next/headers";
 import Image from "next/image";
-import Link from "next/link";
 import { redirect } from "next/navigation";
+import AccessWatchdog from "@/components/AccessWatchdog";
+import DashboardSidebar from "@/components/DashboardSidebar";
+import ExpiryBanner from "@/components/ExpiryBanner";
 
-const NAV_LINKS = [
-  { href: "/dashboard",          label: "Jobs",     icon: "⚡" },
-  { href: "/dashboard/tenders",  label: "Tenders",  icon: "📋" },
-  { href: "/dashboard/alerts",   label: "Alerts",   icon: "🔔" },
-  { href: "/dashboard/billing",  label: "Billing",  icon: "💳" },
-];
+// Internal URL used for server-side API calls (bypasses the browser proxy).
+const INTERNAL_API =
+  process.env.INTERNAL_API_URL ??
+  process.env.NEXT_PUBLIC_API_URL ??
+  "http://localhost:8000";
+
+type AccessStatus = {
+  has_access: boolean;
+  reason: "subscribed" | "trial_active" | "trial_expired" | "no_access";
+  days_remaining: number | null;
+  expires_at: string | null;
+  plan: string | null;
+};
+
+async function getAccessStatus(token: string): Promise<AccessStatus | null> {
+  try {
+    const res = await fetch(`${INTERNAL_API}/api/billing/access-status`, {
+      headers: { Authorization: `Bearer ${token}` },
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    return res.json();
+  } catch {
+    // API unreachable — fail open so a backend hiccup never locks out users.
+    return null;
+  }
+}
 
 export default async function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const { userId } = auth();
+  // ── Step 1: Clerk auth ───────────────────────────────────────────────────
+  const { userId, getToken } = auth();
   if (!userId) redirect("/sign-in");
 
-  // Show an Admin link only to users with the tenzo_admin role.
+  // ── Step 2: Admin role check (must run BEFORE the license gate) ──────────
+  // Admins always have full dashboard access — no license or subscription
+  // check is applied to them.
   const user = await currentUser();
   const isAdmin =
     (user?.publicMetadata as { role?: string } | undefined)?.role === "tenzo_admin";
 
+  // ── Step 3: License / subscription gate (regular users only) ────────────
+  // Billing page is always reachable — expired users must be able to pay.
+  const pathname = headers().get("x-pathname") ?? "";
+  const isBillingPage = pathname.startsWith("/dashboard/billing");
+
+  const token = await getToken();
+  // Admins default to true — their access is never gated by license/subscription.
+  // Regular users default to false until the API confirms active access.
+  let hasAccess = isAdmin;
+  let accessExpiresAt: string | null = null;
+  let accessReason: string | null = null;
+
+  if (!isAdmin && token) {
+    const access = await getAccessStatus(token);
+
+    if (!isBillingPage && access !== null && !access.has_access) {
+      if (access.reason === "trial_expired") {
+        redirect("/dashboard/billing?reason=trial_expired");
+      } else {
+        // no_access — user has never activated a license key
+        redirect("/activate?reason=no_license");
+      }
+    }
+
+    if (access !== null && access.has_access) {
+      hasAccess = true;
+      accessExpiresAt = access.expires_at ?? null;
+      accessReason = access.reason;
+    }
+    // If access is null (API unreachable): hasAccess stays false.
+    // AccessWatchdog will call check() but fail open on network error,
+    // so users are not incorrectly blocked when the backend is briefly down.
+  }
+
   return (
     <div className="min-h-screen flex relative z-10">
-      {/* Sidebar */}
-      <aside
-        className="w-56 flex flex-col py-6 px-3 shrink-0"
-        style={{
-          background: "var(--bg-surface)",
-          borderRight: "1px solid var(--border)",
-        }}
-      >
-        {/* Logo */}
-        <div className="px-3 mb-8">
-          <span
-            className="text-base font-bold tracking-tight"
-            style={{ color: "var(--accent)", fontFamily: "'JetBrains Mono', monospace" }}
-          >
-            GeM<span style={{ color: "var(--text-secondary)" }}>/tender</span>
-          </span>
-        </div>
-
-        {/* Nav */}
-        <nav className="flex-1 space-y-0.5">
-          {NAV_LINKS.map((link) => (
-            <Link
-              key={link.href}
-              href={link.href}
-              className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors"
-              style={{ color: "var(--text-secondary)" }}
-            >
-              <span className="text-base leading-none">{link.icon}</span>
-              <span className="font-medium">{link.label}</span>
-            </Link>
-          ))}
-          {isAdmin && (
-            <Link
-              href="/admin/licenses"
-              className="flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors mt-4"
-              style={{
-                color: "#F87171",
-                borderTop: "1px dashed var(--border)",
-                paddingTop: "14px",
-              }}
-            >
-              <span className="text-base leading-none">🔑</span>
-              <span className="font-medium">Admin · Licenses</span>
-            </Link>
-          )}
-        </nav>
-
-        {/* User */}
-        <div
-          className="mt-auto flex items-center gap-3 px-3 pt-4"
-          style={{ borderTop: "1px solid var(--border)" }}
-        >
-          <UserButton afterSignOutUrl="/" />
-          <span className="text-xs" style={{ color: "var(--text-muted)" }}>
-            Account
-          </span>
-        </div>
-      </aside>
+      {/* Sidebar — client component; disables gated links when hasAccess is false */}
+      <DashboardSidebar hasAccess={hasAccess} isAdmin={isAdmin} />
 
       {/* Main column */}
       <div className="flex-1 flex flex-col min-w-0">
@@ -113,6 +117,13 @@ export default async function DashboardLayout({
             />
           </a>
         </header>
+
+        {/* Watchdog: redirects to billing the moment a license expires mid-session,
+            and immediately on client-side navigation when access is already denied.
+            Not rendered for admins — they are always granted full access. */}
+        {!isAdmin && <AccessWatchdog expiresAt={accessExpiresAt} hasAccess={hasAccess} />}
+        {/* Countdown banner — visible when ≤ 3 days remain; updates every minute */}
+        {!isAdmin && <ExpiryBanner expiresAt={accessExpiresAt} reason={accessReason} />}
 
         <main className="flex-1 p-8 overflow-y-auto">{children}</main>
       </div>
