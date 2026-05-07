@@ -1,4 +1,5 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+import { NextResponse } from "next/server";
 
 // Routes that do NOT require authentication.
 const isPublicRoute = createRouteMatcher([
@@ -12,6 +13,10 @@ export default clerkMiddleware((auth, req) => {
   if (!isPublicRoute(req)) {
     auth().protect();
   }
+  // Forward the current pathname so server layouts can read it via headers().
+  const res = NextResponse.next();
+  res.headers.set("x-pathname", req.nextUrl.pathname);
+  return res;
 });
 
 export const config = {

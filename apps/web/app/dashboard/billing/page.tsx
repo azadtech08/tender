@@ -1,7 +1,6 @@
 "use client";
 
 import { useAuth } from "@clerk/nextjs";
-import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
@@ -35,7 +34,6 @@ type VerifyState = "verifying" | "delayed" | "confirmed" | null;
 
 export default function BillingPage() {
   const { getToken } = useAuth();
-  const router = useRouter();
   const searchParams = useSearchParams();
 
   const [planData, setPlanData]         = useState<PlanData | null>(null);
@@ -77,14 +75,42 @@ export default function BillingPage() {
 
   // ── Post-payment verification + polling ──────────────────────────────────
   // Runs when user returns from PhonePe with ?payment=success.
-  // Polls /api/billing/access-status every 3 s until the webhook has been
-  // processed and access is confirmed (max 10 attempts = 30 s).
+  //
+  // Step 1: Proactively call /api/billing/phonepe/status with the stored
+  //   merchant_transaction_id. This hits PhonePe directly and runs
+  //   _upgrade_subscription on COMPLETED state — handles the case where the
+  //   server-to-server webhook was delayed or not delivered (e.g. ngrok down).
+  //
+  // Step 2: Poll /api/billing/access-status every 3 s for up to 60 s.
+  //
+  // Step 3: On confirmed access, use window.location.href (full reload) so
+  //   the dashboard layout server component re-runs and picks up the new
+  //   subscription — router.push stays client-side and the layout stays stale.
   useEffect(() => {
     if (paymentStatus !== "success") return;
 
     let cancelled = false;
     let attempts  = 0;
-    const MAX_ATTEMPTS = 10;
+    const MAX_ATTEMPTS = 20; // 60 s total
+
+    async function activateIfPending() {
+      const pendingStr = localStorage.getItem("phonepe_pending_txn");
+      if (!pendingStr) return;
+      try {
+        const { merchant_transaction_id } = JSON.parse(pendingStr);
+        const token = await getToken();
+        // Side effect: if PhonePe reports COMPLETED, the backend upgrades the
+        // subscription immediately — no webhook needed.
+        await fetch(
+          `${API}/api/billing/phonepe/status?merchant_transaction_id=${encodeURIComponent(merchant_transaction_id)}`,
+          { headers: { Authorization: `Bearer ${token}` } },
+        );
+      } catch {
+        // Non-critical — polling below will confirm the result regardless.
+      } finally {
+        localStorage.removeItem("phonepe_pending_txn");
+      }
+    }
 
     async function poll() {
       if (cancelled) return;
@@ -101,14 +127,9 @@ export default function BillingPage() {
           if (data.has_access) {
             if (!cancelled) {
               setVerifyState("confirmed");
-              // Reload plan card to reflect the new subscription
-              const token2 = await getToken();
-              const planRes = await fetch(`${API}/api/billing/plan`, {
-                headers: { Authorization: `Bearer ${token2}` },
-              });
-              if (planRes.ok) setPlanData(await planRes.json());
-              // Redirect to dashboard after 2 s
-              setTimeout(() => { if (!cancelled) router.push("/dashboard"); }, 2000);
+              // Full reload so the dashboard layout server component re-runs
+              // and computes hasAccess: true — router.push leaves it stale.
+              setTimeout(() => { if (!cancelled) { window.location.href = "/dashboard"; } }, 2000);
             }
             return;
           }
@@ -121,16 +142,16 @@ export default function BillingPage() {
       if (attempts < MAX_ATTEMPTS && !cancelled) {
         setTimeout(poll, 3000);
       } else if (!cancelled) {
-        // Timed out — stop polling, surface an actionable error
         setVerifyState(null);
         setError(
           "Payment received but access verification timed out. " +
-          "Please refresh this page. If the issue persists, contact support."
+          "Please refresh this page. If the issue persists, contact support.",
         );
       }
     }
 
-    poll();
+    // Proactive status check first, then start polling.
+    activateIfPending().then(() => { if (!cancelled) poll(); });
     return () => { cancelled = true; };
   }, [paymentStatus]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -158,7 +179,13 @@ export default function BillingPage() {
         throw new Error(body.detail ?? `Error ${res.status}`);
       }
 
-      const { redirect_url } = await res.json();
+      const { redirect_url, merchant_transaction_id } = await res.json();
+      // Store so the return handler can proactively verify via PhonePe status API,
+      // bypassing the webhook if it hasn't fired yet.
+      localStorage.setItem(
+        "phonepe_pending_txn",
+        JSON.stringify({ merchant_transaction_id, plan }),
+      );
       window.location.href = redirect_url;
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Payment initiation failed");

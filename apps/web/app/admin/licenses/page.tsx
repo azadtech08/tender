@@ -40,7 +40,12 @@ const STATUS_COLORS: Record<License["status"], string> = {
 
 function fmtDate(s: string | null | undefined) {
   if (!s) return "—";
-  try { return new Date(s).toLocaleDateString("en-IN"); } catch { return s; }
+  try {
+    return new Date(s).toLocaleString("en-IN", {
+      dateStyle: "medium",
+      timeStyle: "short",
+    });
+  } catch { return s; }
 }
 
 export default function LicensesListPage() {

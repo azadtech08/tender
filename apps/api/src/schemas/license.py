@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any, Optional
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 # ── Requests ─────────────────────────────────────────────────────────────────
@@ -20,16 +20,42 @@ from pydantic import BaseModel, ConfigDict, Field
 class LicenseCreate(BaseModel):
     tenant_id: str = Field(min_length=1, max_length=36)
     plan: str = Field(min_length=1, max_length=32)
-    expires_at: datetime
+    # Exactly one of expires_at or duration_hours must be provided.
+    # expires_at — absolute UTC datetime (supports date+time precision).
+    # duration_hours — relative from server "now" (e.g. 2, 6, 24, 168).
+    expires_at: Optional[datetime] = None
+    duration_hours: Optional[float] = Field(default=None, gt=0, le=8760)
     not_before: Optional[datetime] = None
     max_devices: int = Field(default=1, ge=1, le=1000)
     features: dict[str, Any] = Field(default_factory=dict)
     notes: Optional[str] = Field(default=None, max_length=500)
 
+    @model_validator(mode="after")
+    def _require_exactly_one_expiry(self) -> "LicenseCreate":
+        has_abs = self.expires_at is not None
+        has_dur = self.duration_hours is not None
+        if has_abs == has_dur:  # both set or neither set
+            raise ValueError(
+                "Provide exactly one of 'expires_at' or 'duration_hours', not both."
+            )
+        return self
+
 
 class LicenseExtend(BaseModel):
-    new_expires_at: datetime
+    # Exactly one of new_expires_at or duration_hours must be provided.
+    new_expires_at: Optional[datetime] = None
+    duration_hours: Optional[float] = Field(default=None, gt=0, le=8760)
     reason: Optional[str] = Field(default=None, max_length=200)
+
+    @model_validator(mode="after")
+    def _require_exactly_one_expiry(self) -> "LicenseExtend":
+        has_abs = self.new_expires_at is not None
+        has_dur = self.duration_hours is not None
+        if has_abs == has_dur:
+            raise ValueError(
+                "Provide exactly one of 'new_expires_at' or 'duration_hours', not both."
+            )
+        return self
 
 
 class LicenseRevoke(BaseModel):

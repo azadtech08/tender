@@ -107,7 +107,14 @@ async def create_license(
     admin: Annotated[TokenData, Depends(get_admin_user)],
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> LicenseCreatedResponse:
-    if body.expires_at <= _now():
+    # Resolve the final expiry — either an absolute datetime or "now + N hours".
+    now = _now()
+    if body.duration_hours is not None:
+        resolved_expires = now + timedelta(hours=body.duration_hours)
+    else:
+        resolved_expires = body.expires_at  # type: ignore[assignment]
+
+    if resolved_expires <= now:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="expires_at must be in the future",
@@ -121,8 +128,8 @@ async def create_license(
         plan=body.plan,
         status=STATUS_ACTIVE,
         signing_kid=settings.license_active_kid,
-        not_before=body.not_before or _now(),
-        expires_at=body.expires_at,
+        not_before=body.not_before or now,
+        expires_at=resolved_expires,
         max_devices=body.max_devices,
         features=body.features,
         fingerprint_salt=generate_fingerprint_salt(),
@@ -138,7 +145,8 @@ async def create_license(
         target_license_id=license_row.id,
         payload={
             "plan": body.plan,
-            "expires_at": body.expires_at.isoformat(),
+            "expires_at": resolved_expires.isoformat(),
+            "duration_hours": body.duration_hours,
             "max_devices": body.max_devices,
             "notes": body.notes,
         },
@@ -406,14 +414,22 @@ async def extend_license(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> LicenseResponse:
     lic = await _load_license_or_404(db, license_id)
-    if body.new_expires_at <= _now():
+
+    # Resolve the new expiry — either absolute datetime or "now + N hours".
+    now = _now()
+    if body.duration_hours is not None:
+        new_expires = now + timedelta(hours=body.duration_hours)
+    else:
+        new_expires = body.new_expires_at  # type: ignore[assignment]
+
+    if new_expires <= now:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="new_expires_at must be in the future",
         )
 
     old_expires = lic.expires_at
-    lic.expires_at = body.new_expires_at
+    lic.expires_at = new_expires
 
     await write_admin_audit(
         db,
@@ -423,7 +439,8 @@ async def extend_license(
         target_license_id=lic.id,
         payload={
             "old_expires_at": old_expires.isoformat(),
-            "new_expires_at": body.new_expires_at.isoformat(),
+            "new_expires_at": new_expires.isoformat(),
+            "duration_hours": body.duration_hours,
             "reason": body.reason,
         },
         ip=get_client_ip(request),
