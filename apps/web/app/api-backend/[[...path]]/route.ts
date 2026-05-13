@@ -13,7 +13,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 
-export async function handleRequest(
+async function handleRequest(
   req: NextRequest,
   { params }: { params: Promise<{ path?: string[] }> }
 ) {
