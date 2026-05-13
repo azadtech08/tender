@@ -503,7 +503,7 @@ export default function TendersPage() {
                     {COLS.map((col) => {
                       const val = cellValue(t, col);
                       const isIt = col.key === "it_relevant";
-                      const isRef = col.key === "tender_reference_no";
+                      const isRef = col.key === "tender_ref_no";
                       const isTitle = col.key === "title" || col.key === "organisation" || col.key === "ministry";
 
                       return (
@@ -549,7 +549,7 @@ export default function TendersPage() {
                     })}
                     <td className="px-4 py-2.5">
                       <button
-                        onClick={() => deleteTender(t.id, t.tender_reference_no)}
+                        onClick={() => deleteTender(t.id, t.tender_ref_no)}
                         disabled={deletingId === t.id}
                         className="text-xs px-2.5 py-1 rounded font-mono transition-colors disabled:opacity-40"
                         style={{
