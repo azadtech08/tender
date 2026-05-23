@@ -14,6 +14,8 @@ RLS design:
     internal tooling), no rows are visible — this is intentional and safe.
 """
 
+import os
+
 from alembic import op
 import sqlalchemy as sa
 
@@ -29,13 +31,20 @@ TENANT_TABLES = ["jobs", "tenders"]
 def upgrade() -> None:
     conn = op.get_bind()
 
+    gem_app_password = os.environ.get("GEM_APP_DB_PASSWORD")
+    if not gem_app_password:
+        raise RuntimeError(
+            "Migration 003 requires GEM_APP_DB_PASSWORD env var. "
+            "Set it before running: alembic upgrade head"
+        )
+
     # Create a dedicated application role that has RLS enforced.
     # The superuser (postgres / gem) bypasses RLS automatically.
-    conn.execute(sa.text("""
+    conn.execute(sa.text(f"""
         DO $$
         BEGIN
             IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'gem_app') THEN
-                CREATE ROLE gem_app LOGIN PASSWORD 'gem_app_devpass';
+                CREATE ROLE gem_app LOGIN PASSWORD '{gem_app_password}';
             END IF;
         END$$;
     """))

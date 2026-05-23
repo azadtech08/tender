@@ -3,18 +3,9 @@ const nextConfig = {
   // Produce a self-contained output bundle — required by the production Dockerfile
   output: "standalone",
 
-  // Proxy API requests through Next.js to the FastAPI backend via Docker internal DNS.
-  // Browser calls /api-backend/... → Next.js server → http://api:8000/...
-  // This avoids any IP/port issues on the browser side.
-  async rewrites() {
-    const dest = process.env.INTERNAL_API_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-    return [
-      {
-        source: "/api-backend/:path*",
-        destination: `${dest}/:path*`,
-      },
-    ];
-  },
+  // API proxy is handled by app/api-backend/[[...path]]/route.ts (route handler).
+  // That handler forwards to INTERNAL_API_URL (http://api:8000 inside Docker),
+  // preserving the Authorization header. No next.config.js rewrite needed.
 };
 
 module.exports = nextConfig;

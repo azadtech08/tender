@@ -1,8 +1,10 @@
 """Main FastAPI application."""
 
 import structlog
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 
 from config import settings
@@ -31,8 +33,16 @@ structlog.configure(
     cache_logger_on_first_use=True,
 )
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    if settings.is_development:
+        await create_tables()
+    yield
+
+
 # Create FastAPI app
 app = FastAPI(
+    lifespan=lifespan,
     title="GeM Tender SaaS API",
     description="API for GeM Tender scraping and intelligence",
     version="0.1.0",
@@ -45,6 +55,7 @@ app = FastAPI(
 # added last, is outermost and handles OPTIONS pre-flights before any
 # token parsing is attempted.
 app.add_middleware(TenantMiddleware)
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 app.add_middleware(
     CORSMiddleware,
@@ -70,18 +81,6 @@ app.include_router(admin_licenses.router, prefix="/api/admin/licenses", tags=["A
 app.include_router(license_router.router, prefix="/api/license", tags=["License · Client"])
 app.include_router(metrics_router.router, tags=["Observability"])
 
-
-@app.on_event("startup")
-async def startup_event():
-    """Application startup event."""
-    # Create database tables if they don't exist
-    await create_tables()
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Application shutdown event."""
-    pass
 
 
 @app.get("/")
