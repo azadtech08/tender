@@ -141,7 +141,7 @@ def upgrade() -> None:
         sa.Column("tenant_id", sa.String(36), nullable=False),
         sa.Column("name", sa.String(100), nullable=False),
         sa.Column("url", sa.Text(), nullable=False),
-        sa.Column("events", postgresql.JSONB(), nullable=False, server_default="'[]'"),
+        sa.Column("events", postgresql.JSONB(), nullable=False, server_default=sa.text("'[]'::jsonb")),
         sa.Column("secret", sa.String(64), nullable=False),
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default="true"),
         sa.Column("last_fired_at", sa.DateTime(timezone=True), nullable=True),
@@ -166,8 +166,26 @@ def upgrade() -> None:
     )
     op.create_index("ix_webhook_deliveries_webhook_id", "webhook_deliveries", ["webhook_id"])
 
+    # ── 7. RLS on Phase 3 tenant-scoped tables ───────────────────────────────
+    for tbl in ("alerts", "api_keys", "outbound_webhooks"):
+        op.execute(f"ALTER TABLE {tbl} ENABLE ROW LEVEL SECURITY")
+        op.execute(f"DROP POLICY IF EXISTS tenant_isolation ON {tbl}")
+        op.execute(f"""
+            CREATE POLICY tenant_isolation ON {tbl}
+            USING (
+                tenant_id = current_setting('app.tenant_id', true)
+            )
+            WITH CHECK (
+                tenant_id = current_setting('app.tenant_id', true)
+            )
+        """)
+
 
 def downgrade() -> None:
+    for tbl in ("alerts", "api_keys", "outbound_webhooks"):
+        op.execute(f"DROP POLICY IF EXISTS tenant_isolation ON {tbl}")
+        op.execute(f"ALTER TABLE {tbl} DISABLE ROW LEVEL SECURITY")
+
     op.drop_table("webhook_deliveries")
     op.drop_table("outbound_webhooks")
     op.drop_table("api_keys")

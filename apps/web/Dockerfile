@@ -38,6 +38,13 @@ COPY --from=builder /app/public          ./public
 COPY --from=builder /app/.next/static    ./.next/static
 COPY --from=builder /app/.next/standalone ./
 
+# sharp is required for image optimisation in standalone mode
+# Install directly — it is not in package.json so cannot be copied from builder
+RUN npm install --os=linux --cpu=x64 sharp
+
+# Create cache dir with correct ownership before switching to non-root user
+RUN mkdir -p .next/cache && chown -R nextjs:nodejs .next
+
 USER nextjs
 
 EXPOSE 3000

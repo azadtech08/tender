@@ -9,7 +9,7 @@ export default function LandingPage() {
       <nav className="flex items-center justify-between px-6 py-4 max-w-6xl mx-auto">
         <span className="text-xl font-bold text-blue-400">GeM Tender</span>
         <div className="flex items-center gap-4">
-          <Link href="/pricing" className="text-sm text-slate-300 hover:text-white">
+          <Link href="/dashboard/billing" className="text-sm text-slate-300 hover:text-white">
             Pricing
           </Link>
           <SignedOut>

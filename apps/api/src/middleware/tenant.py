@@ -14,10 +14,13 @@ Design notes:
   pre-flight requests pass through without token validation.
 """
 
+import structlog
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 
 from auth import verify_token
+
+_log = structlog.get_logger()
 
 
 class TenantMiddleware(BaseHTTPMiddleware):
@@ -47,7 +50,7 @@ class TenantMiddleware(BaseHTTPMiddleware):
         except Exception as exc:
             # Never let token-parsing errors crash the request — auth
             # enforcement is the responsibility of each route's Depends().
-            print(f"[TENANT] verify_token error (non-fatal): {exc}", flush=True)
+            _log.warning("tenant_middleware.verify_token_error", error=str(exc))
 
         request.state.tenant_id = tenant_id
         return await call_next(request)

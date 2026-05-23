@@ -4,12 +4,9 @@ services:
     container_name: gem-tender-db
     environment:
       POSTGRES_USER: gem
-      POSTGRES_PASSWORD: devpass
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: gem_tender
-    ports:
-      - "5432:5432"
     volumes:
-      - D:/TENDER/data/postgres:/var/lib/postgresql/data
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U gem -d gem_tender"]
@@ -18,14 +15,20 @@ services:
       retries: 5
     networks:
       - gem-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
 
   redis:
     image: redis:7-alpine
     container_name: gem-tender-redis
-    ports:
-      - "6379:6379"
     volumes:
-      - D:/TENDER/data/redis:/data
+      - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -33,6 +36,14 @@ services:
       retries: 5
     networks:
       - gem-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
 
   api:
     build:
@@ -40,41 +51,32 @@ services:
       dockerfile: ./apps/api/Dockerfile
     container_name: gem-tender-api
     environment:
-      DATABASE_URL: postgresql+asyncpg://gem:devpass@postgres:5432/gem_tender
-      SYNC_DATABASE_URL: postgresql://gem:devpass@postgres:5432/gem_tender
+      DATABASE_URL: ${DATABASE_URL}
+      SYNC_DATABASE_URL: ${SYNC_DATABASE_URL}
       REDIS_URL: redis://redis:6379
-      ENVIRONMENT: development
-      DEBUG: "true"
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      DEBUG: ${DEBUG:-false}
       PYTHONPATH: /app/src
-      APP_BASE_URL: http://localhost:3000
-      CORS_ORIGINS: '["http://localhost:3000","http://localhost:8000"]'
-      # Clerk Auth
-      CLERK_JWKS_URL: "https://firm-stallion-78.clerk.accounts.dev/.well-known/jwks.json"
-      CLERK_ISSUER: "https://firm-stallion-78.clerk.accounts.dev"
-      CLERK_SECRET_KEY: "sk_test_XG8BXk5PXcnUPmrRtnRzznYA4vumvT4p4YUFI0kjhM"
-
-      # PhonePe Business Payment Gateway — OAuth 2.0 new API (Test Mode)
-      # PhonePe Business Dashboard → Developer Settings → API Keys
-      PHONEPE_CLIENT_ID: "M23ZJ2OVPWFJV_2603070950"
-      PHONEPE_CLIENT_SECRET: "M2NhNWFjYWMtOTFmYS00NTc3LTg2OTYtMTU2MWJkMDEwODE3"
-      PHONEPE_CLIENT_VERSION: "1"
-      PHONEPE_AUTH_BASE_URL: "https://api-preprod.phonepe.com/apis/pg-sandbox"
-      PHONEPE_PG_BASE_URL: "https://api-preprod.phonepe.com/apis/pg-sandbox"
-      # ngrok tunnel so PhonePe can POST callbacks to your local machine
-      PHONEPE_WEBHOOK_BASE_URL: "https://cataclinal-draven-unbeaming.ngrok-free.dev"
-      # Cloudflare R2 (optional for local dev)
-      S3_ENDPOINT: ""
-      S3_BUCKET: gem-tender-dev
-      S3_ACCESS_KEY: ""
-      S3_SECRET_KEY: ""
-      # Licensing (Phase 4+)
-      LICENSE_ACTIVE_KID: v1
-      LICENSE_PRIVATE_KEY_PATH: /keys/signing_private_v1.pem
-      LICENSE_PUBLIC_KEY_PATH: /keys/signing_public_v1.pem
-      # Local-dev admin allowlist for /api/admin/licenses (Phase 3)
-      LOCAL_ADMIN_USER_IDS: '["1"]'
-      # License enforcement mode — off | warn | enforce (Phase 5; Phase 0 §8)
-      LICENSING_MODE: "off"
+      APP_BASE_URL: ${APP_BASE_URL:-http://localhost:3000}
+      CORS_ORIGINS: ${CORS_ORIGINS}
+      CLERK_JWKS_URL: ${CLERK_JWKS_URL}
+      CLERK_ISSUER: ${CLERK_ISSUER}
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY}
+      PHONEPE_CLIENT_ID: ${PHONEPE_CLIENT_ID}
+      PHONEPE_CLIENT_SECRET: ${PHONEPE_CLIENT_SECRET}
+      PHONEPE_CLIENT_VERSION: ${PHONEPE_CLIENT_VERSION:-1}
+      PHONEPE_AUTH_BASE_URL: ${PHONEPE_AUTH_BASE_URL}
+      PHONEPE_PG_BASE_URL: ${PHONEPE_PG_BASE_URL}
+      PHONEPE_WEBHOOK_BASE_URL: ${PHONEPE_WEBHOOK_BASE_URL}
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_BUCKET: ${S3_BUCKET:-gem-tender-dev}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-}
+      LICENSE_ACTIVE_KID: ${LICENSE_ACTIVE_KID:-v1}
+      LICENSE_PRIVATE_KEY_PATH: ${LICENSE_PRIVATE_KEY_PATH:-/keys/signing_private_v1.pem}
+      LICENSE_PUBLIC_KEY_PATH: ${LICENSE_PUBLIC_KEY_PATH:-/keys/signing_public_v1.pem}
+      LOCAL_ADMIN_USER_IDS: ${LOCAL_ADMIN_USER_IDS:-["1"]}
+      LICENSING_MODE: ${LICENSING_MODE:-off}
     ports:
       - "8000:8000"
     depends_on:
@@ -88,11 +90,19 @@ services:
       - ./apps/api/scripts:/app/scripts
       - ./packages/db-models:/packages/db-models
       - ./packages/licensing:/packages/licensing
-      - D:TENDER/data/pdfs:/pdfs
-      - D:/TENDER/data/keys:/keys:ro
+      - pdfs_data:/pdfs
+      - ${DATA_DIR:-./data}/keys:/keys:ro
     networks:
       - gem-network
-    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload --app-dir /app/src
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --app-dir /app/src
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
 
   worker:
     build:
@@ -100,9 +110,9 @@ services:
       dockerfile: ./apps/worker/Dockerfile
     container_name: gem-tender-worker
     environment:
-      SYNC_DATABASE_URL: postgresql://gem:devpass@postgres:5432/gem_tender
+      SYNC_DATABASE_URL: ${SYNC_DATABASE_URL}
       REDIS_URL: redis://redis:6379
-      ENVIRONMENT: development
+      ENVIRONMENT: ${ENVIRONMENT:-development}
       PYTHONPATH: /app/src
       DOWNLOAD_DIR: /pdfs
     depends_on:
@@ -113,10 +123,17 @@ services:
     volumes:
       - ./apps/worker/src:/app/src
       - ./packages/db-models:/packages/db-models
-      - D:/TENDER/data/pdfs:/pdfs
       - pdfs_data:/pdfs
     networks:
       - gem-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
 
   celery-beat:
     build:
@@ -124,9 +141,9 @@ services:
       dockerfile: ./apps/worker/Dockerfile
     container_name: gem-tender-beat
     environment:
-      SYNC_DATABASE_URL: postgresql://gem:devpass@postgres:5432/gem_tender
+      SYNC_DATABASE_URL: ${SYNC_DATABASE_URL}
       REDIS_URL: redis://redis:6379
-      ENVIRONMENT: development
+      ENVIRONMENT: ${ENVIRONMENT:-development}
       PYTHONPATH: /app/src
     depends_on:
       - redis
@@ -136,35 +153,45 @@ services:
     networks:
       - gem-network
     command: celery -A celery_app beat --loglevel=info
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+        reservations:
+          cpus: '0.25'
+          memory: 256M
 
   web:
     build:
       context: .
       dockerfile: ./apps/web/Dockerfile
-      target: deps          # stop at deps stage so node_modules are available for dev
+      target: runner
       args:
-        NEXT_PUBLIC_API_URL: ""
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
+        NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
     container_name: gem-tender-web
-    working_dir: /app
     environment:
-      NEXT_PUBLIC_API_URL: ""
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
       INTERNAL_API_URL: "http://api:8000"
-      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: "pk_test_ZmlybS1zdGFsbGlvbi03OC5jbGVyay5hY2NvdW50cy5kZXYk"
-      CLERK_SECRET_KEY: "sk_test_XG8BXk5PXcnUPmrRtnRzznYA4vumvT4p4YUFI0kjhM"
-      NODE_ENV: development
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: ${NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY}
+      CLERK_SECRET_KEY: ${CLERK_SECRET_KEY}
+      NODE_ENV: ${NODE_ENV:-production}
       NEXT_TELEMETRY_DISABLED: "1"
-      WATCHPACK_POLLING: "true"
-      CHOKIDAR_USEPOLLING: "true"
     ports:
       - "3000:3000"
-    volumes:
-      - ./apps/web:/app                  # live source mount for hot-reload
-      - web_node_modules:/app/node_modules  # persist node_modules across restarts
     networks:
       - gem-network
-    command: sh -c "rm -rf .next && npm run dev"
     depends_on:
       - api
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+        reservations:
+          cpus: '0.25'
+          memory: 512M
 
 volumes:
   postgres_data:

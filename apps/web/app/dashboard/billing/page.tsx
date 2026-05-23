@@ -1,7 +1,7 @@
 "use client";
 
 import { useAuth } from "@clerk/nextjs";
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 const API = "/api-backend";
@@ -32,7 +32,7 @@ type UsageData = {
 //  "confirmed" — access verified, redirecting in 2 s
 type VerifyState = "verifying" | "delayed" | "confirmed" | null;
 
-export default function BillingPage() {
+function BillingContent() {
   const { getToken } = useAuth();
   const searchParams = useSearchParams();
 
@@ -324,5 +324,13 @@ export default function BillingPage() {
         })}
       </div>
     </div>
+  );
+}
+
+export default function BillingPage() {
+  return (
+    <Suspense fallback={<div className="text-slate-500 text-sm">Loading…</div>}>
+      <BillingContent />
+    </Suspense>
   );
 }

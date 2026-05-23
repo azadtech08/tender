@@ -11,7 +11,7 @@ from sqlalchemy import and_, func, nulls_last, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import TokenData, get_current_user
-from database import get_db
+from database import get_db, get_db_rls
 from db_models import COUNTER_TENDERS_EXPORTED, Job, Tender
 from schemas.tender import TenderListResponse, TenderResponse
 from services.license_enforcement import LicenseGuard, require_valid_license
@@ -84,7 +84,7 @@ def _build_tsquery(keywords: list[str], match: str):
 @router.get("/ministries")
 async def list_ministries(
     current_user: Annotated[TokenData, Depends(get_current_user)],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_db_rls)],
 ) -> list[str]:
     """Return distinct ministry values for the current tenant."""
     result = await db.execute(
@@ -99,7 +99,7 @@ async def list_ministries(
 @router.get("", response_model=TenderListResponse)
 async def list_tenders(
     current_user: Annotated[TokenData, Depends(get_current_user)],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_db_rls)],
     guard: Annotated[LicenseGuard, Depends(require_valid_license)],  # noqa: ARG001
     job_id: int | None = Query(default=None),
     keyword: str | None = Query(default=None),
@@ -181,7 +181,7 @@ async def list_tenders(
 @router.get("/export/xlsx")
 async def export_tenders_xlsx(
     current_user: Annotated[TokenData, Depends(get_current_user)],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_db_rls)],
     guard: Annotated[LicenseGuard, Depends(require_valid_license)],
     search: str | None = Query(default=None),
 ) -> Response:
@@ -222,7 +222,7 @@ async def export_tenders_xlsx(
 async def delete_tender(
     tender_id: int,
     current_user: Annotated[TokenData, Depends(get_current_user)],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_db_rls)],
 ):
     """Delete a single tender. Tenant-scoped — users can only delete their own."""
     result = await db.execute(
@@ -243,7 +243,7 @@ async def delete_tender(
 async def download_tender_pdf(
     tender_id: int,
     current_user: Annotated[TokenData, Depends(get_current_user)],
-    db: Annotated[AsyncSession, Depends(get_db)],
+    db: Annotated[AsyncSession, Depends(get_db_rls)],
 ):
     """Download the source PDF for a tender.
 
