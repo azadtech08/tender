@@ -425,6 +425,21 @@ async def activate_license(
         if body.platform:
             device.platform = body.platform
 
+    # ── 6b. Bind license tenant to the activating user (first activation) ──
+    # Only runs after all deny checks pass so a revoked/expired key never
+    # accidentally claims a tenant. Enables /api/billing/access-status to
+    # locate the license by the user's Clerk tenant_id.
+    activating_tenant: Optional[str] = getattr(request.state, "tenant_id", None)
+    if activating_tenant and prior_count == 0 and activating_tenant != lic.tenant_id:
+        logger.info(
+            "license.tenant_bound",
+            license_id=lic.id,
+            old_tenant=lic.tenant_id,
+            new_tenant=activating_tenant,
+        )
+        lic.tenant_id = activating_tenant
+        device.tenant_id = activating_tenant  # keep device row in sync for RLS
+
     # ── 7. Mint and return signed token ─────────────────────────────────────
     try:
         signer = get_signer()

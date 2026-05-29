@@ -18,7 +18,7 @@ from __future__ import annotations
 import secrets as _secrets
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Optional, Union
 
 import structlog
 try:
@@ -43,11 +43,11 @@ from db_models import License
 
 logger = structlog.get_logger()
 
-_signer_singleton: Optional["LicenseSigner"] = None
+_signer_singleton: Optional[Union["LicenseSigner", "_JwtFallbackSigner"]] = None
 
 
 class LicenseSigner:
-    """Holds the active private key and mints signed license tokens."""
+    """Holds the active private key and mints signed PASETO license tokens."""
 
     def __init__(self, private_key: PrivateKey) -> None:
         self._private_key = private_key
@@ -63,22 +63,15 @@ class LicenseSigner:
         fingerprint: str,
         ttl_seconds: Optional[int] = None,
     ) -> tuple[str, datetime]:
-        """Sign a token for the given license bound to the device fingerprint.
-
-        Returns
-        -------
-        (token, expires_at)
-            ``token`` is the PASETO v4.public string.
-            ``expires_at`` is the UTC datetime the token expires
-            (``min(now+ttl, license.expires_at)``).
-        """
         now = datetime.now(tz=timezone.utc)
         ttl = ttl_seconds or settings.license_token_ttl_seconds
-        token_exp = min(now + timedelta(seconds=ttl), license_row.expires_at)
+        base_exp = now + timedelta(seconds=ttl)
+        token_exp = (
+            min(base_exp, license_row.expires_at)
+            if license_row.expires_at is not None
+            else base_exp
+        )
 
-        # Phase 4 always emits HWID-bound tokens (the only mode the activation
-        # endpoint supports today). Per-license override could read from
-        # license_row.features in a future revision.
         binding_mode = (
             DeviceBindingMode.HWID if license_row.max_devices > 0 else DeviceBindingMode.NONE
         )
@@ -101,6 +94,48 @@ class LicenseSigner:
         return token, token_exp
 
 
+class _JwtFallbackSigner:
+    """HS256 JWT fallback used in dev when tenzo_licensing or key files are absent.
+
+    NOT suitable for production — the token is signed with the JWT_SECRET_KEY
+    env var rather than an Ed25519 key pair.
+    """
+
+    @property
+    def kid(self) -> str:
+        return "jwt-dev-fallback"
+
+    def mint_token(
+        self,
+        license_row: License,
+        *,
+        fingerprint: str,
+        ttl_seconds: Optional[int] = None,
+    ) -> tuple[str, datetime]:
+        from jose import jwt  # python-jose is a declared dependency
+
+        now = datetime.now(tz=timezone.utc)
+        ttl = ttl_seconds or settings.license_token_ttl_seconds
+        base_exp = now + timedelta(seconds=ttl)
+        token_exp = (
+            min(base_exp, license_row.expires_at)
+            if license_row.expires_at is not None
+            else base_exp
+        )
+
+        claims = {
+            "lic_id": str(license_row.id),
+            "tenant_id": license_row.tenant_id,
+            "plan": license_row.plan,
+            "iat": int(now.timestamp()),
+            "exp": int(token_exp.timestamp()),
+            "fingerprint": fingerprint,
+            "nonce": _secrets.token_hex(16),
+        }
+        token = jwt.encode(claims, settings.jwt_secret_key, algorithm="HS256")
+        return token, token_exp
+
+
 def _load_private_key_from_disk(path: str, kid: str) -> PrivateKey:
     pem = Path(path).read_bytes()
     return load_private_key(kid, pem)
@@ -115,18 +150,31 @@ def _load_private_key_from_secrets_manager(secret_id: str, kid: str) -> PrivateK
     return load_private_key(kid, pem)
 
 
-def _build_signer() -> LicenseSigner:
+def _build_signer() -> Union[LicenseSigner, _JwtFallbackSigner]:
     kid = settings.license_active_kid
 
+    if not _TENZO_AVAILABLE:
+        logger.warning(
+            "license_signer.tenzo_unavailable_jwt_fallback",
+            note="Install tenzo_licensing for PASETO tokens in production",
+        )
+        return _JwtFallbackSigner()
+
     if settings.license_private_key_path:
+        key_path = Path(settings.license_private_key_path)
+        if not key_path.exists():
+            logger.warning(
+                "license_signer.key_file_missing_jwt_fallback",
+                path=str(key_path),
+                note="Create the key file for PASETO tokens in production",
+            )
+            return _JwtFallbackSigner()
         logger.info(
             "license_signer.load_from_disk",
-            path=settings.license_private_key_path,
+            path=str(key_path),
             kid=kid,
         )
-        return LicenseSigner(
-            _load_private_key_from_disk(settings.license_private_key_path, kid)
-        )
+        return LicenseSigner(_load_private_key_from_disk(str(key_path), kid))
 
     logger.info(
         "license_signer.load_from_secrets_manager",
@@ -140,7 +188,7 @@ def _build_signer() -> LicenseSigner:
     )
 
 
-def get_signer() -> LicenseSigner:
+def get_signer() -> Union[LicenseSigner, _JwtFallbackSigner]:
     """Return the process-wide signer, building it on first use."""
     global _signer_singleton
     if _signer_singleton is None:
