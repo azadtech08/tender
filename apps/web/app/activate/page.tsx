@@ -1,5 +1,6 @@
 "use client";
 
+import { useAuth } from "@clerk/nextjs";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
@@ -43,6 +44,7 @@ type ActivateResult =
 
 export default function ActivatePage() {
   const router = useRouter();
+  const { getToken } = useAuth();
   const inputRef = useRef<HTMLInputElement>(null);
 
   const [key, setKey]           = useState("");
@@ -68,9 +70,13 @@ export default function ActivatePage() {
     setResult(null);
 
     try {
+      const token = await getToken();
+      const reqHeaders: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) reqHeaders["Authorization"] = `Bearer ${token}`;
+
       const res = await fetch(`${API}/api/license/activate`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: reqHeaders,
         body: JSON.stringify({
           key:         trimmed,
           fingerprint: getBrowserFingerprint(),

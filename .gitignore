@@ -64,6 +64,9 @@ env/
 *.crt
 .secrets/
 secrets.json
+gcs-key.json
+*-key.json
+data/keys/
 
 # --- Node / Next.js ---
 node_modules/
