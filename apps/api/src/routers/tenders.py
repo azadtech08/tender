@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth import TokenData, get_current_user
 from database import get_db, get_db_rls
+from scraper.gem_proxy_scraper import scrape_gem_direct
 from db_models import COUNTER_TENDERS_EXPORTED, Job, Tender
 from schemas.tender import TenderListResponse, TenderResponse
 from services.license_enforcement import LicenseGuard, require_valid_license
@@ -31,14 +32,15 @@ def _safe_filename(name: str) -> str:
     return re.sub(r'[\\/*?:"<>|]', "_", name)
 
 
-_DEFAULT_SORT = "bid_start_latest"
+_DEFAULT_SORT = "gem_order"
 
 _SORT_OPTIONS = {
-    "newest":             Tender.id.desc(),
-    "bid_start_latest":   nulls_last(Tender.published_date.desc()),
-    "bid_start_oldest":   nulls_last(Tender.published_date.asc()),
-    "bid_end_latest":     nulls_last(Tender.bid_end_date.desc()),
-    "bid_end_oldest":     nulls_last(Tender.bid_end_date.asc()),
+    "gem_order":        (nulls_last(Tender.gem_position.asc()), Tender.id.asc()),
+    "newest":           (Tender.id.desc(),),
+    "bid_start_latest": (nulls_last(Tender.published_date.desc()), Tender.id.desc()),
+    "bid_start_oldest": (nulls_last(Tender.published_date.asc()),  Tender.id.asc()),
+    "bid_end_latest":   (nulls_last(Tender.bid_end_date.desc()),   Tender.id.desc()),
+    "bid_end_oldest":   (nulls_last(Tender.bid_end_date.asc()),    Tender.id.asc()),
 }
 
 # Max distinct keywords we combine in a single search (guard against pathological input).
@@ -94,6 +96,27 @@ async def list_ministries(
         .order_by(Tender.ministry)
     )
     return [row for (row,) in result.all()]
+
+
+@router.get("/gem-live")
+async def gem_live_search(
+    current_user: Annotated[TokenData, Depends(get_current_user)],
+    keyword: str = Query(..., min_length=1),
+    sort: str = Query(default="bid_end_latest"),
+    page: int = Query(default=1, ge=1),
+):
+    """
+    Live proxy of GeM portal search.
+    Returns exact same bids in exact same order as GeM portal.
+    No DB involved. Real-time fetch from GeM.
+    """
+    import asyncio
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(
+        None,
+        lambda: scrape_gem_direct(keyword=keyword, sort=sort, page=page)
+    )
+    return result
 
 
 @router.get("", response_model=TenderListResponse)
@@ -154,18 +177,18 @@ async def list_tenders(
     count_q = select(func.count()).select_from(q.subquery())
     total = (await db.execute(count_q)).scalar_one()
 
-    # Ordering — explicit sort param > FTS rank > default (bid_start_latest)
+    # Ordering — explicit sort param > FTS rank > default (gem_order)
     effective_sort = sort if (sort and sort in _SORT_OPTIONS) else None
     if effective_sort:
-        q = q.order_by(_SORT_OPTIONS[effective_sort], Tender.id.desc())
+        q = q.order_by(*_SORT_OPTIONS[effective_sort])
     elif combined_tsq is not None:
         try:
             rank = func.ts_rank(Tender.search_vector, combined_tsq)
             q = q.order_by(rank.desc(), Tender.id.desc())
         except AttributeError:
-            q = q.order_by(_SORT_OPTIONS[_DEFAULT_SORT], Tender.id.desc())
+            q = q.order_by(*_SORT_OPTIONS[_DEFAULT_SORT])
     else:
-        q = q.order_by(_SORT_OPTIONS[_DEFAULT_SORT], Tender.id.desc())
+        q = q.order_by(*_SORT_OPTIONS[_DEFAULT_SORT])
 
     q = q.offset((page - 1) * per_page).limit(per_page)
     tenders = (await db.execute(q)).scalars().all()
@@ -235,7 +258,6 @@ async def delete_tender(
     if tender is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tender not found")
     await db.delete(tender)
-    await db.commit()
     return None
 
 
@@ -245,11 +267,7 @@ async def download_tender_pdf(
     current_user: Annotated[TokenData, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db_rls)],
 ):
-    """Download the source PDF for a tender.
-
-    Tries the shared local volume first (worker writes PDFs to /pdfs),
-    then falls back to S3/R2 when `pdf_s3_key` is set.
-    """
+    """Serve tender PDF: local file → S3 → direct GeM fetch → redirect."""
     result = await db.execute(
         select(Tender).where(
             Tender.id == tender_id,
@@ -261,27 +279,47 @@ async def download_tender_pdf(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tender not found")
 
     filename = f"{_safe_filename(tender.tender_ref_no)}.pdf"
+
+    # 1. Local file
     local_path = os.path.join(_PDF_DIR, filename)
-
     if os.path.isfile(local_path):
-        return FileResponse(
-            local_path,
-            media_type="application/pdf",
-            filename=filename,
-        )
+        return FileResponse(local_path, media_type="application/pdf", filename=filename)
 
-    # Fallback: S3/R2
+    # 2. S3/R2
     if tender.pdf_s3_key:
         data = download_file(tender.pdf_s3_key)
         if data:
-            from fastapi.responses import Response
             return Response(
                 content=data,
                 media_type="application/pdf",
                 headers={"Content-Disposition": f'attachment; filename="{filename}"'},
             )
 
-    raise HTTPException(
-        status_code=status.HTTP_404_NOT_FOUND,
-        detail="PDF not available for this tender",
-    )
+    # 3. Try direct GeM PDF download (link = showbidDocument/{id})
+    if tender.link:
+        try:
+            import httpx as _httpx
+            _headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                "Referer": "https://bidplus.gem.gov.in/all-bids",
+            }
+            async with _httpx.AsyncClient(timeout=30, follow_redirects=True) as client:
+                r = await client.get(tender.link, headers=_headers)
+                if r.status_code == 200 and "pdf" in r.headers.get("content-type", "").lower():
+                    return Response(
+                        content=r.content,
+                        media_type="application/pdf",
+                        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+                    )
+        except Exception:
+            pass
+
+    # 4. Redirect to GeM portal page
+    gem_link = tender.link
+    if not gem_link and tender.tender_ref_no:
+        gem_link = f"https://bidplus.gem.gov.in/advance-search/search/bid/{tender.tender_ref_no}"
+    if gem_link:
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url=gem_link, status_code=302)
+
+    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="PDF not available")

@@ -6,10 +6,21 @@ from typing import Optional
 from pydantic import BaseModel, field_validator
 
 
+_VALID_SORT_PREFS = {"bid_end_latest", "bid_end_oldest", "bid_start_latest", "bid_start_oldest"}
+
+
 class JobCreate(BaseModel):
     keywords: list[str]
     cards_per_kw: int = 3
     min_value: Optional[float] = None
+    sort_preference: str = "bid_end_latest"
+
+    @field_validator("sort_preference")
+    @classmethod
+    def sort_pref_valid(cls, v: str) -> str:
+        if v not in _VALID_SORT_PREFS:
+            raise ValueError(f"sort_preference must be one of {_VALID_SORT_PREFS}")
+        return v
 
     @field_validator("keywords")
     @classmethod
@@ -35,6 +46,7 @@ class JobResponse(BaseModel):
     cards_per_kw: int
     min_value: Optional[float]
     status: str
+    sort_preference: Optional[str]
     celery_task_id: Optional[str]
     total_keywords: Optional[int]
     done_keywords: Optional[int]

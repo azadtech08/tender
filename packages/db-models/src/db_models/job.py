@@ -68,6 +68,9 @@ class Job(Base, TimestampMixin):
         index=True,
     )
     celery_task_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    sort_preference: Mapped[Optional[str]] = mapped_column(
+        String(30), nullable=True, server_default="bid_end_latest"
+    )
     total_keywords: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     done_keywords: Mapped[Optional[int]] = mapped_column(Integer, default=0)
     total_tenders: Mapped[Optional[int]] = mapped_column(Integer, default=0)

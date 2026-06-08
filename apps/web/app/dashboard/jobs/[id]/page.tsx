@@ -58,10 +58,11 @@ type LogLine = {
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 const SORT_OPTIONS = [
-  { value: "published_latest", label: "Bid Start Date: Latest First" },
-  { value: "published_oldest", label: "Bid Start Date: Oldest First" },
-  { value: "bid_end_latest",   label: "Bid End Date: Latest First" },
-  { value: "bid_end_oldest",   label: "Bid End Date: Oldest First" },
+  { value: "gem_order",          label: "GeM Order (default)" },
+  { value: "bid_end_latest",     label: "Bid End Date: Latest First" },
+  { value: "bid_end_oldest",     label: "Bid End Date: Oldest First" },
+  { value: "bid_start_latest",   label: "Bid Start Date: Latest First" },
+  { value: "bid_start_oldest",   label: "Bid Start Date: Oldest First" },
 ];
 
 const LOG_COLORS: Record<string, string> = {
@@ -100,7 +101,8 @@ function formatPayload(payload: Record<string, unknown>): string {
 function ProgressRing({ pct, status }: { pct: number; status: string }) {
   const r = 36;
   const circ = 2 * Math.PI * r;
-  const dash = (pct / 100) * circ;
+  const isSpinning = pct === -1;
+  const dash = isSpinning ? circ * 0.28 : (pct / 100) * circ;
 
   const colour =
     status === "completed" ? "#10B981"
@@ -110,9 +112,10 @@ function ProgressRing({ pct, status }: { pct: number; status: string }) {
 
   return (
     <svg width="96" height="96" viewBox="0 0 96 96" className="shrink-0">
-      {/* Track */}
+      {isSpinning && (
+        <style>{`@keyframes gem-ring-spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}`}</style>
+      )}
       <circle cx="48" cy="48" r={r} fill="none" stroke="#2C3040" strokeWidth="6" />
-      {/* Progress */}
       <circle
         cx="48" cy="48" r={r}
         fill="none"
@@ -121,9 +124,12 @@ function ProgressRing({ pct, status }: { pct: number; status: string }) {
         strokeLinecap="round"
         strokeDasharray={`${dash} ${circ - dash}`}
         strokeDashoffset={circ / 4}
-        style={{ transition: "stroke-dasharray 0.5s ease" }}
+        style={
+          isSpinning
+            ? { transformOrigin: "48px 48px", animation: "gem-ring-spin 1s linear infinite" }
+            : { transition: "stroke-dasharray 0.5s ease" }
+        }
       />
-      {/* Centre text */}
       <text
         x="48" y="52"
         textAnchor="middle"
@@ -132,7 +138,7 @@ function ProgressRing({ pct, status }: { pct: number; status: string }) {
         fontFamily="'JetBrains Mono', monospace"
         fill={colour}
       >
-        {pct}%
+        {isSpinning ? "…" : `${pct}%`}
       </text>
     </svg>
   );
@@ -154,7 +160,7 @@ export default function JobDetailPage() {
   const [selectedMinistries, setSelectedMinistries] = useState<string[]>([]);
   const [ministryOpen, setMinistryOpen] = useState(false);
   const [sortOrder, setSortOrder] = useState<string>(
-    searchParams.get("sort") ?? "published_latest"
+    searchParams.get("sort") ?? "gem_order"
   );
   const [ministries, setMinistries] = useState<string[]>([]);
   const [expanded, setExpanded] = useState<Record<number, boolean>>({});
@@ -245,7 +251,7 @@ export default function JobDetailPage() {
           message: j.error_message ?? undefined,
         });
       }
-    }, 2000);
+    }, 750);
   }
 
   // ── Init ─────────────────────────────────────────────────────────────────────
@@ -330,7 +336,11 @@ export default function JobDetailPage() {
   const isDone   = job.status === "completed" || job.status === "failed";
   const done     = job.done_keywords ?? 0;
   const total    = job.total_keywords ?? 1;
-  const pct      = total > 0 ? Math.round((done / total) * 100) : (isDone ? 100 : 0);
+  const pct      = isDone
+    ? 100
+    : isActive
+      ? total > 0 && done > 0 ? Math.round((done / total) * 100) : -1
+      : 0;
 
   const allItems = tenders?.items ?? [];
   const availableStates = Array.from(
@@ -400,7 +410,7 @@ export default function JobDetailPage() {
               <button
                 onClick={handleRun}
                 className="text-xs px-4 py-2 rounded-lg font-medium transition-colors glow-amber"
-                style={{ background: "var(--accent)", color: "#0F1117" }}
+                style={{ background: "var(--accent)", color: "#e9ecf5" }}
               >
                 {job.status === "pending" ? "▶ Run" : "↺ Re-run"}
               </button>
@@ -678,32 +688,19 @@ export default function JobDetailPage() {
                           className="px-3 py-2.5 font-mono whitespace-nowrap"
                           onClick={(e) => e.stopPropagation()}
                         >
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={() =>
-                                handleDownload(
-                                  `${API}/api/tenders/${t.id}/pdf`,
-                                  `${t.tender_ref_no ?? `tender-${t.id}`}.pdf`,
-                                )
-                              }
-                              title="Download PDF"
-                              className="transition-colors"
-                              style={{ color: "var(--accent)" }}
-                            >
-                              ↓ PDF
-                            </button>
-                            {t.link && (
-                              <a
-                                href={t.link}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                title="Open on GeM"
-                                style={{ color: "var(--text-secondary)" }}
-                              >
-                                ↗ GeM
-                              </a>
-                            )}
-                          </div>
+                          <button
+                            onClick={() => {
+                              const url =
+                                t.link ||
+                                `https://bidplus.gem.gov.in/advance-search/search/bid/${t.tender_ref_no}`;
+                              window.open(url, "_blank");
+                            }}
+                            title="Open on GeM portal"
+                            className="transition-colors"
+                            style={{ color: "var(--accent)" }}
+                          >
+                            ↗ GeM
+                          </button>
                         </td>
                       </tr>
                       {isOpen && (

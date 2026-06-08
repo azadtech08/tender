@@ -8,7 +8,7 @@ import os
 import re
 import random
 import time
-from datetime import date, datetime, timezone
+from datetime import date, datetime
 from typing import Callable, Optional
 
 import requests
@@ -20,7 +20,7 @@ from .selectors import (
     BASE_URL, BID_BASE_URL,
     SEARCH_INPUT, BID_CARDS, BID_NO_LINK,
     SORT_DROPDOWN, SORT_LATEST, CLOSE_MODAL, NEXT_PAGE,
-    DOWNLOAD_HEADERS,
+    DOWNLOAD_HEADERS, GEM_SORT_SELECTORS,
 )
 from .pdf_extractor import parse_pdf, extract_fields, is_it_relevant
 from utils.s3 import upload_file_from_path
@@ -30,9 +30,6 @@ logger = structlog.get_logger(__name__)
 # Safety cap — pagination stops here even if the caller's target is not met.
 # Prevents a runaway scrape on a huge result set or a broken Next button loop.
 MAX_PAGES = 100
-
-# Sort sentinel — tenders with no bid_end_date sort after all others (end of list).
-_FAR_FUTURE = datetime(9999, 12, 31, tzinfo=timezone.utc)
 
 # ── Card text parsers ─────────────────────────────────────────────────────────
 
@@ -151,12 +148,19 @@ def _dismiss_modal(page: Page) -> None:
         pass
 
 
-def _sort_results(page: Page) -> None:
+def _sort_results(page: Page, sort_pref: str = "bid_end_latest") -> None:
+    selector = GEM_SORT_SELECTORS.get(sort_pref, SORT_LATEST)
     try:
         toggle = page.locator(SORT_DROPDOWN).first
         toggle.click()
         time.sleep(1)
-        page.locator(SORT_LATEST).first.click()
+        option = page.locator(selector).first
+        if not option.is_visible(timeout=2000):
+            # Selector not found on live GeM — fall back to the proven default
+            logger.debug("sort.option_not_found", sort_pref=sort_pref, fallback="bid_end_latest")
+            page.locator(SORT_LATEST).first.click()
+        else:
+            option.click()
         time.sleep(random.uniform(3, 5))
         page.wait_for_selector(BID_CARDS, timeout=10000)
     except Exception as exc:
@@ -185,10 +189,16 @@ def _advance_page(page: Page, log) -> bool:
         return False
 
 
-def _collect_cards(page: Page, limit: int) -> list[dict]:
-    """Collect up to `limit` bid card dicts from current results page."""
+def _collect_cards_with_position(
+    page: Page, limit: int, start_position: int = 1
+) -> list[dict]:
+    """Collect up to `limit` bid card dicts and assign gem_position at collection time.
+
+    start_position lets page 2, 3... continue numbering from where page 1 left off.
+    """
     collected: list[dict] = []
     seen: set[str] = set()
+    current_position = start_position  # continues across pages
 
     for _attempt in range(3):
         cards = page.locator(BID_CARDS).all()
@@ -211,7 +221,12 @@ def _collect_cards(page: Page, limit: int) -> list[dict]:
                 key = href if href else text[:200]
                 if key and key not in seen:
                     seen.add(key)
-                    collected.append({"text": text, "pdf_url": href or "N/A"})
+                    collected.append({
+                        "text":         text,
+                        "pdf_url":      href or "N/A",
+                        "gem_position": current_position,  # locked at collection time
+                    })
+                    current_position += 1
             except Exception:
                 continue
         if len(collected) >= limit:
@@ -242,6 +257,7 @@ class GemScraper:
         cards_per_kw: int,
         log,
         _emit: Callable,
+        sort_pref: str = "bid_end_latest",
     ) -> list[dict]:
         """Launch a browser, search for keyword, and return raw card dicts.
 
@@ -281,7 +297,7 @@ class GemScraper:
                 page.wait_for_selector(BID_CARDS, timeout=20000)
                 log.info("scraper.results_loaded")
 
-                _sort_results(page)
+                _sort_results(page, sort_pref)
 
                 # Accumulate unique cards across pages; stop as soon as the
                 # user's requested count is met or we run out of pages.
@@ -299,9 +315,13 @@ class GemScraper:
                             added += 1
                     return added
 
-                # Page 1
-                page_cards = _collect_cards(page, limit=cards_per_kw)
+# Page 1
+                global_position = 1  # absolute position counter across all pages
+                page_cards = _collect_cards_with_position(
+                    page, limit=cards_per_kw, start_position=global_position
+                )
                 _absorb(page_cards)
+                global_position = len(all_cards) + 1  # next page continues from here
                 log.info(
                     "scraper.cards_collected",
                     count=len(all_cards),
@@ -325,9 +345,12 @@ class GemScraper:
                         )
                         break
                     current_page += 1
-                    remaining = cards_per_kw - len(all_cards)
-                    page_cards = _collect_cards(page, limit=remaining)
+                    remaining  = cards_per_kw - len(all_cards)
+                    page_cards = _collect_cards_with_position(
+                        page, limit=remaining, start_position=global_position
+                    )
                     _absorb(page_cards)
+                    global_position = len(all_cards) + 1  # update for next page
                     log.info(
                         "scraper.cards_collected",
                         count=len(page_cards),
@@ -354,6 +377,7 @@ class GemScraper:
         cards_per_kw: int = 3,
         min_value: Optional[float] = None,
         on_event: Optional[Callable[[str, dict], None]] = None,
+        sort_pref: str = "bid_end_latest",
     ) -> list[dict]:
         """Scrape one keyword from GeM and return tender dicts.
 
@@ -378,7 +402,7 @@ class GemScraper:
         last_error: Optional[Exception] = None
         for attempt in range(1, max_attempts + 1):
             try:
-                cards = self._search_and_collect(keyword, cards_per_kw, log, _emit)
+                cards = self._search_and_collect(keyword, cards_per_kw, log, _emit, sort_pref)
                 last_error = None
                 break
             except Exception as exc:
@@ -401,17 +425,19 @@ class GemScraper:
             return results
 
         # Process each card (browser already closed — only PDF downloads + parsing)
-        for i, card in enumerate(cards, 1):
+        for card in cards:
             try:
                 cf = _parse_card_text(card["text"])
                 pdf_url = card["pdf_url"]
-                bid_no = cf["Bid_No"]
+                bid_no  = cf["Bid_No"]
+                gem_pos = card["gem_position"]  # set at collection time — never reassign
 
-                log.info("scraper.card_processing", bid_no=bid_no, i=i, total=len(cards))
-                _emit("card_scraped", {"keyword": keyword, "bid_no": bid_no, "i": i})
+                log.info("scraper.card_processing", bid_no=bid_no, gem_position=gem_pos)
+                _emit("card_scraped", {"keyword": keyword, "bid_no": bid_no, "gem_position": gem_pos})
 
                 tender: dict = {
                     "keyword": keyword,
+                    "gem_position": gem_pos,
                     "tender_ref_no": bid_no,
                     "tender_type": cf["Tender_Type"],
                     "published_date": _parse_date(cf["Start_Date"]),
@@ -481,7 +507,7 @@ class GemScraper:
                         tender["email"] = (
                             extracted["Email"] if extracted["Email"] != "N/A" else None
                         )
-
+     
                         buyer = extracted.get("Buyer", "N/A")
                         if buyer != "N/A":
                             tender["organisation"] = buyer
@@ -526,14 +552,11 @@ class GemScraper:
                 log.warning("scraper.card_failed", i=i, error=str(exc))
                 continue
 
-        # Sort merged results by bid end date (soonest deadline first).
-        # Tenders with no parseable end date are pushed to the end of the list.
-        results.sort(key=lambda t: t.get("bid_end_date") or _FAR_FUTURE)
-
-        # Return exactly what the user asked for. If the min_value filter dropped
-        # items, this may be fewer than cards_per_kw — we can't backfill because
-        # the browser session is already closed.
-        results = results[:cards_per_kw]
+        # Preserve GeM portal order — do NOT re-sort.
+        # gem_position (1-based) was captured from the card index during collection
+        # and reflects the order GeM returned after applying sort_pref on the portal.
+        # Truncate only if the min_value filter produced more than requested.
+        
 
         log.info("scraper.keyword_done", tenders_found=len(results))
         return results

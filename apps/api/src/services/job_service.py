@@ -26,6 +26,7 @@ async def create_job(
         keywords=data.keywords,
         cards_per_kw=data.cards_per_kw,
         min_value=data.min_value,
+        sort_preference=data.sort_preference,
         status="pending",
         total_keywords=len(data.keywords),
         done_keywords=0,

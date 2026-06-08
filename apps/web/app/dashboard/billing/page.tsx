@@ -197,10 +197,10 @@ function BillingContent() {
 
   return (
     <div>
-      <h1 className="text-2xl font-bold text-slate-900 mb-2">Billing</h1>
+      <h1 className="text-2xl font-bold text-white mb-2">Billing</h1>
       <p className="text-slate-500 text-sm mb-6">
         Current plan:{" "}
-        <span className="font-semibold text-slate-800 capitalize">
+        <span className="font-semibold text-amber-400 capitalize">
           {planData?.plan ?? "—"}
         </span>
         {planData?.status === "past_due" && (

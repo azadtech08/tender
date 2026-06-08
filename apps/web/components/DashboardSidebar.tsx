@@ -4,9 +4,10 @@ import { UserButton } from "@clerk/nextjs";
 import Link from "next/link";
 
 const GATED_LINKS = [
-  { href: "/dashboard",         label: "Jobs",    icon: "⚡" },
-  { href: "/dashboard/tenders", label: "Tenders", icon: "📋" },
-  { href: "/dashboard/alerts",  label: "Alerts",  icon: "🔔" },
+  { href: "/dashboard",             label: "Jobs",        icon: "⚡" },
+  { href: "/dashboard/live-search", label: "Live Search", icon: "🔍" },
+  { href: "/dashboard/tenders",     label: "Tenders",     icon: "📋" },
+  { href: "/dashboard/alerts",      label: "Alerts",      icon: "🔔" },
 ];
 
 export default function DashboardSidebar({

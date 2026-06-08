@@ -98,6 +98,9 @@ class Tender(Base, TimestampMixin):
     # Additional metadata
     pdf_s3_key: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
 
+    # GeM portal card position (1-based rank in GeM search results for this keyword)
+    gem_position: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
     # Relationships
     job: Mapped["Job"] = relationship("Job", back_populates="tenders", lazy="joined")  # noqa: F821
 

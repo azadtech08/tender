@@ -6,10 +6,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 const TENDER_SORT_OPTIONS = [
-  { value: "published_latest", label: "Bid Start Date: Latest First" },
-  { value: "published_oldest", label: "Bid Start Date: Oldest First" },
-  { value: "bid_end_latest",   label: "Bid End Date: Latest First" },
-  { value: "bid_end_oldest",   label: "Bid End Date: Oldest First" },
+  { value: "gem_order",          label: "GeM Order (default)" },
+  { value: "bid_end_latest",     label: "Bid End Date: Latest First" },
+  { value: "bid_end_oldest",     label: "Bid End Date: Oldest First" },
+  { value: "bid_start_latest",   label: "Bid Start Date: Latest First" },
+  { value: "bid_start_oldest",   label: "Bid Start Date: Oldest First" },
 ];
 
 const API = "/api-backend";
@@ -35,7 +36,7 @@ export default function DashboardPage() {
   const [perKeyword, setPerKeyword] = useState(10);
   const [creating, setCreating]     = useState(false);
   const [deletingId, setDeletingId] = useState<number | null>(null);
-  const [tenderSort, setTenderSort]       = useState("published_latest");
+  const [tenderSort, setTenderSort]       = useState("gem_order");
   const [tenderSortOpen, setTenderSortOpen] = useState(false);
   const tenderSortRef = useRef<HTMLDivElement>(null);
 
@@ -71,7 +72,7 @@ export default function DashboardPage() {
     const res = await fetch(`${API}/api/jobs`, {
       method: "POST",
       headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ keywords: kws, cards_per_kw: perKeyword }),
+      body: JSON.stringify({ keywords: kws, cards_per_kw: perKeyword, sort_preference: tenderSort }),
     });
     if (res.ok) {
       const job = await res.json();
@@ -255,7 +256,7 @@ export default function DashboardPage() {
             onClick={createAndRun}
             disabled={creating}
             className="text-sm px-5 py-2.5 rounded-lg font-semibold transition-opacity disabled:opacity-50 glow-amber"
-            style={{ background: "var(--accent)", color: "#0F1117" }}
+            style={{ background: "var(--accent)", color: "#d6dbe7" }}
           >
             {creating ? "Creating…" : "▶ Run"}
           </button>

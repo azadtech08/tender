@@ -20,6 +20,32 @@ SORT_LATEST = (
     "//a[contains(text(),'Bid End Date: Latest First')] | "
     "//li[contains(text(),'Bid End Date: Latest First')]"
 )
+SORT_BID_END_OLDEST = (
+    "//a[contains(text(),'Bid End Date: Oldest First')] | "
+    "//li[contains(text(),'Bid End Date: Oldest First')]"
+)
+SORT_BID_START_LATEST = (
+    "//a[contains(text(),'Bid Start Date: Latest First')] | "
+    "//li[contains(text(),'Bid Start Date: Latest First')] | "
+    "//a[contains(text(),'Published Date: Latest')] | "
+    "//li[contains(text(),'Published Date: Latest')]"
+)
+SORT_BID_START_OLDEST = (
+    "//a[contains(text(),'Bid Start Date: Oldest First')] | "
+    "//li[contains(text(),'Bid Start Date: Oldest First')] | "
+    "//a[contains(text(),'Published Date: Oldest')] | "
+    "//li[contains(text(),'Published Date: Oldest')]"
+)
+
+# Maps the sort_preference string (stored on Job) to the GeM UI selector.
+# If a selector does not match on the live portal, _sort_results() falls back
+# to bid_end_latest (the only option verified against GeM's current DOM).
+GEM_SORT_SELECTORS: dict[str, str] = {
+    "bid_end_latest":   SORT_LATEST,
+    "bid_end_oldest":   SORT_BID_END_OLDEST,
+    "bid_start_latest": SORT_BID_START_LATEST,
+    "bid_start_oldest": SORT_BID_START_OLDEST,
+}
 CLOSE_MODAL = "//button[contains(text(),'Close')]"
 NEXT_PAGE = "//a[normalize-space()='Next' and not(contains(@class,'disabled'))]"
 

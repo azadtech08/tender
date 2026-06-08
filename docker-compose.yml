@@ -1,3 +1,4 @@
+version: '3.8' 
 services:
   postgres:
     image: postgres:16-alpine
@@ -77,7 +78,7 @@ services:
       LICENSE_PUBLIC_KEY_PATH: ${LICENSE_PUBLIC_KEY_PATH:-/keys/signing_public_v1.pem}
       LOCAL_ADMIN_USER_IDS: ${LOCAL_ADMIN_USER_IDS:-["1"]}
       LICENSING_MODE: ${LICENSING_MODE:-off}
-      GOOGLE_APPLICATION_CREDENTIALS: /keys/gcs-key.json
+      GOOGLE_APPLICATION_CREDENTIALS: /gcs-key.json
     ports:
       - "8000:8000"
     depends_on:

@@ -141,7 +141,7 @@ function CreateAlertForm({ onCreated }: { onCreated: () => void }) {
       <button
         onClick={() => setOpen((v) => !v)}
         className="px-4 py-2 rounded text-sm font-semibold transition-colors"
-        style={{ background: "var(--accent)", color: "#0F1117" }}
+        style={{  color: "#dadee9" }}
       >
         {open ? "Cancel" : "+ New Alert"}
       </button>
@@ -153,9 +153,9 @@ function CreateAlertForm({ onCreated }: { onCreated: () => void }) {
           className="mt-4 p-5 rounded-xl space-y-4"
           style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }}
         >
-          <h3 className="font-semibold" style={{ color: "var(--text-primary)" }}>
+          <h3 className="font-semibold text-white" >
             Create Alert
-          </h3>
+          </h3>     
 
           <div className="grid grid-cols-2 gap-4">
             <div>
@@ -247,7 +247,7 @@ function CreateAlertForm({ onCreated }: { onCreated: () => void }) {
               type="submit"
               disabled={saving}
               className="px-4 py-2 rounded text-sm font-semibold disabled:opacity-50"
-              style={{ background: "var(--accent)", color: "#0F1117" }}
+              style={{ background: "var(--accent)", color: "#0f46ec" }}
             >
               {saving ? "Saving…" : "Create Alert"}
             </button>

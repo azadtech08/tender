@@ -33,6 +33,7 @@ class TenderResponse(BaseModel):
     link: Optional[str]
     scraped_date: Optional[date]
     pdf_s3_key: Optional[str]
+    gem_position: Optional[int]
     created_at: datetime
 
     model_config = {"from_attributes": True}

@@ -46,8 +46,10 @@ async function handleRequest(
       body: req.method !== "GET" && req.method !== "HEAD" ? await req.text() : undefined,
     });
 
-    // Create a response with the same status and content
-    const responseBody = await response.text();
+    // 204/205/304 must have a null body per HTTP spec — undici throws if a body
+    // (even an empty string) is passed to the Response constructor for these statuses.
+    const NULL_BODY_STATUSES = new Set([204, 205, 304]);
+    const responseBody = NULL_BODY_STATUSES.has(response.status) ? null : await response.text();
     const nextResponse = new NextResponse(responseBody, {
       status: response.status,
       statusText: response.statusText,
